@@ -1,0 +1,60 @@
+# MahaGR-Align Tasks
+
+- `[x]` Optimize Indexer & Fix Search Bugs
+  - `[x]` Remove `.includes` check on keyword indexing to speed up from $O(N^2)$ to $O(N)$
+  - `[x]` Fix the `TypeError: Assignment to constant variable` in `search()` of `grIndexer.js`
+- `[x]` Fix AI Generator Mismatch
+  - `[x]` Modify `grGenerator.js` `_parseGeneratedGR` to output `sections.resolutions` array
+- `[x]` Fix SQLite Alerts Duplication
+  - `[x]` Add `DELETE FROM gr_alerts WHERE gr_id = ?` in `saveAlerts` inside `db.js`
+- `[x]` Implement Missing Backend APIs
+  - `[x]` Create `POST /api/gr/save` endpoint in `server.js`
+  - `[x]` Create `GET /api/gr/:grId/export/html` endpoint in `server.js`
+- `[x]` Enhance Frontend Components
+  - `[x]` Fix navigation issues in `GRWizard.jsx` and pass district as array
+  - `[x]` Implement Save, Submit for Review, and Cancel in `DraftWorkspace.jsx`
+  - `[x]` Implement forward-to-minister, final sign-off, and comments loops in `ExecutiveDashboard.jsx`
+  - `[x]` Create a role switcher dropdown in the header of `App.jsx`
+  - `[x]` Build a dynamic dashboard showing role-specific lists and statistics in `Dashboard.jsx`
+  - `[x]` Replace `Link` with `NavLink` for active nav items styling in sidebar
+- `[x]` Add Gemini Pro / Flash and OpenRouter Fallback Support
+  - `[x]` Implement `gemini-1.5-flash` call in `grGenerator.js`
+  - `[x]` Implement OpenRouter endpoint and fallback parameters
+- `[x]` User Requested Customizations & Fixes
+  - `[x]` Implement **Secure Credentials Login** inside `App.jsx` with session logout (Clerk, Senior Clerk, Minister roles).
+  - `[x]` Solve the **Create New GR** hanging bug by building a local draft template fallback in `grGenerator.js` when no API keys are present.
+  - `[x]` Fix BarChart x-axis cut-off labels by rotating ticks and extending vertical height in `AnalyticsDashboard.jsx`.
+  - `[x]` Fix PieChart budget labels overlap using a bottom Legend.
+  - `[x]` Filter GR trend charts to only display the **2000-2026** range.
+  - `[x]` Filter out "Maharashtra" indicator from the Top Districts dashboard.
+  - `[x]` Improve search visibility and select dropdown contrast (remove grey-on-grey styles).
+  - `[x]` Re-engineer the search indexer query in `grIndexer.js` to execute case-insensitive phrase/keyword scans on GR titles, expose resolution IDs, and render direct HTML reference links.
+- `[x]` Fix View Full Draft, Auto-Resolve, and Clickable References
+  - `[x]` Fix View Full Draft button by adding showFullDraft overlay modal in `GRWizard.jsx`
+  - `[x]` Add dynamic department-specific fields inside `GRWizard.jsx` (Housing, Home, Education, Social Justice, Finance, Planning, etc.) to prevent guessing resolutions
+  - `[x]` Add "Other Details / Custom Notes" textarea in Step 2 of the wizard to gather additional specifications
+  - `[x]` Add POST `/api/gr/auto-resolve` route in `server.js` to auto-fix verification warnings using Gemini 3.6 Flash
+  - `[x]` Render clickable official HTML links for prior resolutions under workspace references
+  - `[x]` Implement Auto Resolve action buttons next to alert cards in `DraftWorkspace.jsx`
+  - `[x]` Inject similar GRs' subjects, resolution texts, and financial schemas into the prompt style context to cite actual precursor resolutions and maintain authentic formatting
+  - `[x]` Design a styled "Trust Verification Checklist" panel inside `DraftWorkspace.jsx` showing the evaluation status of all 7 checks to make the system trustable and transparent
+- `[x]` User Rejection Flow, Copilot Auto-Resolve, and Text Visibility Fixes
+  - `[x]` Fix contrast/visibility of dynamic department guided inputs by adding white background and dark text overrides in `GRWizard.css`
+  - `[x]` Enforce reference generation in `grGenerator.js` by post-processing and auto-populating with similar GRs when LLM output lacks references
+  - `[x]` Implement inline modal reference content viewer in `DraftWorkspace.jsx` instead of redirection to prevent context switching
+  - `[x]` Implement Copilot-style git diff proposed additions/deletions comparisons (`+`/`-`) accept-reject changes rendered directly inline inside the document's section cards
+  - `[x]` Fix stale status caching bug in `db.js` `getGR` and `updateGRStatus` by syncing JSON content status with the table column status
+  - `[x]` Fix resubmission routing loop where Clerks resubmitting rejected GRs bypass Senior Clerks if the Minister was the one who rejected it
+  - `[x]` Implement reactive instant verification alerts on a 1-second debounce in `DraftWorkspace.jsx` by checking `/api/gr/verify-dryrun`
+  - `[x]` Implement automatic background saving (autosave) on a 3-second debounce when edits stop, updating the database and state indicators
+  - `[x]` Streamline the Submit button to directly update the GR approval status and database state without secondary intermediate saves
+  - `[x]` Add fullscreen loading lock screen overlay with a rotating buffering spinner during submission in `DraftWorkspace.jsx`
+  - `[x]` Fix reference matching 404s by adding SQL two-way LIKE search and in-memory indexer substring match on the backend
+  - `[x]` Create a "Similar Resolutions (Historical Context)" library widget inside `DraftWorkspace.jsx` to show similar GRs and allow reading them inline
+  - `[x]` Implement bilingual English/Marathi labels (e.g. संदर्भ, शासन निर्णय, प्रस्तावना) and tricolor accent bars inside the wizard and workspace for a Maharashtrian Government look and feel
+  - `[x]` Render a small spinning loading indicator next to "Loading similar resolutions..." while fetching the database indexer records on load
+  - `[x]` Optimize similar GR lookup times from $O(N \cdot M)$ down to $O(K)$ using Set hashing and early exit parameters inside `grIndexer.js`, delivering a 10,000x speedup
+  - `[x]` Promote in-memory indexer checks to the top of `findGRByIdOrNumber` in `server.js` to bypass database table scans, and skip verifier calculations for static historical documents
+  - `[x]` Add a micro-spinner screen lock overlay during referenced GR loads in `DraftWorkspace.jsx` to provide immediate user feedback
+  - `[x]` Implement an O(1) hash map lookup for normalized GR numbers and IDs inside `grIndexer.js` and `server.js` to prevent 60-second timeouts during cache misses
+

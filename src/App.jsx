@@ -1,121 +1,117 @@
 import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
+import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom'
+import Dashboard from './components/Dashboard'
+import GRWizard from './components/GRWizard'
+import DraftWorkspace from './components/DraftWorkspace'
+import ExecutiveDashboard from './components/ExecutiveDashboard'
+import AnalyticsDashboard from './components/AnalyticsDashboard'
 import './App.css'
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [user, setUser] = useState({ role: 'clerk', name: 'John Doe', id: 'clerk_001' })
+  const [currentGR, setCurrentGR] = useState(null)
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <Router>
+      <div className="app">
+        {/* Header */}
+        <header className="header">
+          <div className="header-container">
+            <div className="logo-section">
+              <div className="gov-logo">🏛️</div>
+              <div className="header-text">
+                <h1>MAHARASHTRA GR-Align</h1>
+                <p>Government Resolution Management System</p>
+              </div>
+            </div>
+            <div className="user-section">
+              <span className="user-role">{user.role.toUpperCase()}</span>
+              <select 
+                className="role-selector" 
+                value={user.role} 
+                onChange={(e) => {
+                  const role = e.target.value;
+                  if (role === 'clerk') {
+                    setUser({ role: 'clerk', name: 'John Doe', id: 'clerk_001' });
+                  } else if (role === 'senior_officer') {
+                    setUser({ role: 'senior_officer', name: 'Officer Deshmukh', id: 'officer_002' });
+                  } else if (role === 'minister') {
+                    setUser({ role: 'minister', name: 'Minister Patil', id: 'minister_003' });
+                  }
+                }}
+                style={{
+                  background: 'transparent',
+                  color: 'white',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  borderRadius: '4px',
+                  padding: '4px 8px',
+                  fontSize: '14px',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                <option value="clerk" style={{color: 'black'}}>Clerk: John Doe</option>
+                <option value="senior_officer" style={{color: 'black'}}>Senior Officer: Officer Deshmukh</option>
+                <option value="minister" style={{color: 'black'}}>Minister: Minister Patil</option>
+              </select>
+            </div>
+          </div>
+        </header>
 
-      <div className="ticks"></div>
+        {/* Main Container */}
+        <div className="app-container">
+          {/* Sidebar */}
+          <aside className="sidebar">
+            <nav className="nav-menu">
+              <NavLink to="/" className="nav-item">
+                <span className="icon">📊</span>
+                <span className="label">Dashboard</span>
+              </NavLink>
+              {user.role === 'clerk' && (
+                <NavLink to="/create" className="nav-item">
+                  <span className="icon">✍️</span>
+                  <span className="label">Create GR</span>
+                </NavLink>
+              )}
+              {(user.role === 'senior_officer' || user.role === 'minister') && (
+                <NavLink to={`/approve/pending`} className="nav-item">
+                  <span className="icon">🗳️</span>
+                  <span className="label">Executive Review</span>
+                </NavLink>
+              )}
+              <NavLink to="/analytics" className="nav-item">
+                <span className="icon">📈</span>
+                <span className="label">Analytics</span>
+              </NavLink>
+            </nav>
+          </aside>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+          {/* Main Content */}
+          <main className="main-content">
+            <Routes>
+              <Route path="/" element={<Dashboard user={user} setCurrentGR={setCurrentGR} />} />
+              <Route path="/create" element={<GRWizard setCurrentGR={setCurrentGR} />} />
+              <Route path="/draft/:grId" element={<DraftWorkspace currentGR={currentGR} user={user} />} />
+              <Route path="/approve/:grId" element={<ExecutiveDashboard user={user} />} />
+              <Route path="/analytics" element={<AnalyticsDashboard />} />
+            </Routes>
+          </main>
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+        {/* Footer */}
+        <footer className="footer">
+          <div className="footer-content">
+            <p>&copy; 2026 Government of Maharashtra | Version 1.0.0</p>
+            <div className="footer-links">
+              <a href="#">Help</a>
+              <a href="#">Privacy Policy</a>
+              <a href="#">Contact</a>
+            </div>
+          </div>
+        </footer>
+      </div>
+    </Router>
   )
 }
 
