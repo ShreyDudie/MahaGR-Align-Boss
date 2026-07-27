@@ -186,7 +186,7 @@ export class GRParser {
     let currentResolution = '';
     let inResolution = false;
 
-    lines.forEach((line, idx) => {
+    lines.forEach((line) => {
       // Check for resolution start markers
       if (/^(?:Resolution:|Resolved:|The\s+Government)/.test(line.trim())) {
         if (currentResolution) {

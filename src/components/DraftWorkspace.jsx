@@ -1,20 +1,23 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import './DraftWorkspace.css';
 
-export default function DraftWorkspace({ currentGR, user }) {
+export default function DraftWorkspace({ currentGR }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { grId } = useParams();
-  const [gr, setGr] = useState(currentGR);
-  const [alerts, setAlerts] = useState([]);
+  const [gr, setGr] = useState(location.state?.gr || currentGR);
+  const [alerts, setAlerts] = useState(location.state?.alerts || []);
   const [editingSection, setEditingSection] = useState(null);
   const [savedStatus, setSavedStatus] = useState('saved');
   const [resolvingAlertId, setResolvingAlertId] = useState(null);
-  const [checksRun, setChecksRun] = useState([]);
+  const [checksRun, setChecksRun] = useState(location.state?.checksRun || []);
   const [proposedChange, setProposedChange] = useState(null);
   const [selectedReferenceGR, setSelectedReferenceGR] = useState(null);
+  const [selectedReferenceHighlightKeyword, setSelectedReferenceHighlightKeyword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [submittingStep, setSubmittingStep] = useState(0);
   const [similarGrs, setSimilarGrs] = useState([]);
   const [loadingSimilar, setLoadingSimilar] = useState(false);
   const [loadingReference, setLoadingReference] = useState(false);
@@ -38,6 +41,11 @@ export default function DraftWorkspace({ currentGR, user }) {
   }, [gr]);
 
   const handleViewReferenceText = async (grNumber) => {
+    if (gr?.preloadedReferences && gr.preloadedReferences[grNumber]) {
+      setSelectedReferenceGR(gr.preloadedReferences[grNumber]);
+      return;
+    }
+
     setLoadingReference(true);
     try {
       const response = await axios.get(`http://localhost:5000/api/gr/${encodeURIComponent(grNumber)}`);
@@ -110,10 +118,10 @@ export default function DraftWorkspace({ currentGR, user }) {
       }
     };
 
-    if (grId) {
+    if (grId && !location.state?.gr) {
       fetchGRAndAlerts();
     }
-  }, [grId]);
+  }, [grId, location.state]);
 
   // Reactive Instant Verification (1-second debounce)
   useEffect(() => {
@@ -182,12 +190,36 @@ export default function DraftWorkspace({ currentGR, user }) {
     }
   };
 
+
+
+  const renderHighlightedText = (text, keyword) => {
+    if (!text) return 'N/A';
+    if (!keyword) return text;
+    
+    // Split by case-insensitive keyword
+    const parts = text.split(new RegExp(`(${keyword})`, 'gi'));
+    return (
+      <>
+        {parts.map((part, i) => 
+          part.toLowerCase() === keyword.toLowerCase()
+            ? <mark key={i} style={{ backgroundColor: '#fde047', color: '#0f172a', padding: '2px 4px', borderRadius: '3px', fontWeight: 'bold' }}>{part}</mark>
+            : part
+        )}
+      </>
+    );
+  };
+
   const resolveAlert = (alertId) => {
     setAlerts(prev => prev.filter(a => a.id !== alertId));
   };
 
   const handleSubmit = async () => {
     setSubmitting(true);
+    setSubmittingStep(0);
+    const interval = setInterval(() => {
+      setSubmittingStep(prev => (prev < 4 ? prev + 1 : prev));
+    }, 1200);
+
     try {
       const nextStatus = gr.rejectedBy === 'minister' ? 'pending_signature' : 'pending_approval';
       const updatedGr = { 
@@ -195,7 +227,12 @@ export default function DraftWorkspace({ currentGR, user }) {
         status: nextStatus,
         rejectedBy: null // Clear once re-submitted
       };
+
+      // 5-second artificial delay to visually show the progress steps (HCI concept)
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
       const response = await axios.post(`http://localhost:5000/api/gr/save`, updatedGr);
+      clearInterval(interval);
       if (response.data.success) {
         alert(nextStatus === 'pending_signature' ? '🚀 GR submitted directly back to Minister!' : '🚀 GR submitted for review!');
         navigate('/');
@@ -204,8 +241,11 @@ export default function DraftWorkspace({ currentGR, user }) {
         setSubmitting(false);
       }
     } catch (error) {
+      clearInterval(interval);
       alert('Failed to submit: ' + error.message);
       setSubmitting(false);
+    } finally {
+      clearInterval(interval);
     }
   };
 
@@ -217,19 +257,7 @@ export default function DraftWorkspace({ currentGR, user }) {
     return <div className="draft-workspace">Loading...</div>;
   }
 
-  const severityColors = {
-    critical: '#d32f2f',
-    high: '#f57c00',
-    medium: '#f39c12',
-    low: '#388e3c',
-  };
 
-  const alertCount = {
-    critical: alerts.filter(a => a.severity === 'critical').length,
-    high: alerts.filter(a => a.severity === 'high').length,
-    medium: alerts.filter(a => a.severity === 'medium').length,
-    low: alerts.filter(a => a.severity === 'low').length,
-  };
 
   const renderSectionContent = (sectionKey, originalContent) => {
     const hasStagedChange = proposedChange && proposedChange.updatedGr?.sections?.[sectionKey] !== gr.sections?.[sectionKey];
@@ -322,9 +350,7 @@ export default function DraftWorkspace({ currentGR, user }) {
 
     return (
       <div className="section-preview">
-        {sectionKey === 'header' || sectionKey === 'resolution'
-          ? (originalContent || 'N/A')
-          : (originalContent?.substring(0, 200) || 'N/A') + (originalContent?.length > 200 ? '...' : '')}
+        {originalContent || 'N/A'}
       </div>
     );
   };
@@ -339,10 +365,28 @@ export default function DraftWorkspace({ currentGR, user }) {
 
       <div className="workspace-header">
         <div className="header-left">
-          <h2>{gr.metadata?.subject || 'New GR'}</h2>
+          <h2>{gr.metadata?.subject || 'Government Resolution'}</h2>
           <span className="status">{gr.department}</span>
+          <span style={{ fontSize: '12px', background: '#F1F5F9', padding: '4px 8px', borderRadius: '4px', border: '1px solid #CBD5E1', marginLeft: '10px' }}>
+            ID: <strong>{gr.calculated_21_digit_gr_id || gr.id}</strong>
+          </span>
         </div>
-        <div className="header-right">
+        <div className="header-right" style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            style={{
+              background: '#046A38',
+              color: 'white',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+            onClick={() => window.open(`http://localhost:5000/api/gr/${encodeURIComponent(gr.id)}/export/html`, '_blank')}
+          >
+            🖨️ Official Format & PDF Download
+          </button>
+
           <button className={`save-btn ${savedStatus}`} onClick={handleSave}>
             {savedStatus === 'saved' && '✅ Saved'}
             {savedStatus === 'unsaved' && '💾 Save'}
@@ -351,6 +395,142 @@ export default function DraftWorkspace({ currentGR, user }) {
           </button>
         </div>
       </div>
+
+      {/* POLICY CONFLICT AUDIT WARNING BANNER */}
+      {alerts.length > 0 && (
+        <div style={{
+          background: alerts.some(a => a.severity === 'critical') ? '#FEE2E2' : '#FEF3C7',
+          border: `2px solid ${alerts.some(a => a.severity === 'critical') ? '#DC2626' : '#D97706'}`,
+          borderRadius: '8px',
+          padding: '20px',
+          marginBottom: '20px',
+          color: alerts.some(a => a.severity === 'critical') ? '#7F1D1D' : '#78350F'
+        }}>
+          <h3 style={{ margin: '0 0 12px 0', fontSize: '18px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: '8px' }}>
+            🚨 TASK A: POLICY & CONFLICT AUDITING ALERT ({alerts.some(a => a.severity === 'critical') ? 'CRITICAL' : 'WARNING'})
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {alerts.map((alert, idx) => {
+              let highlightWord = '';
+              const keywords = ['Krishi', 'Annapurna', 'Sukarmi', 'Saur', 'Solar', 'Yuva', 'Karya', 'Food Processing', 'Cooperative', 'Dhananjayrao', 'Nodal'];
+              const found = keywords.find(k => (alert.description || '').toLowerCase().includes(k.toLowerCase()) || (alert.title || '').toLowerCase().includes(k.toLowerCase()));
+              if (found) {
+                highlightWord = found;
+              }
+
+              return (
+                <div key={idx} style={{
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  border: '1px solid rgba(0, 0, 0, 0.05)',
+                  borderRadius: '6px',
+                  padding: '14px 18px',
+                  fontSize: '13.5px',
+                  lineHeight: '1.6',
+                  color: '#1e293b',
+                  textAlign: 'left'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <div style={{ fontWeight: '800', fontSize: '14.5px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      📌 {alert.title || alert.category || 'Policy Conflict'}
+                    </div>
+                    <span style={{ 
+                      fontSize: '10px', 
+                      fontWeight: 'bold', 
+                      textTransform: 'uppercase', 
+                      padding: '2px 6px', 
+                      borderRadius: '3px',
+                      color: 'white',
+                      backgroundColor: alert.severity === 'critical' ? '#d32f2f' : '#f57c00'
+                    }}>
+                      {alert.severity}
+                    </span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <strong>Why it occurred:</strong> {alert.description}
+                  </div>
+                  {alert.evidence && (
+                    <div style={{ fontSize: '12.5px', color: '#475569', background: 'rgba(0, 0, 0, 0.03)', padding: '6px 10px', borderRadius: '4px', marginBottom: '8px' }}>
+                      <strong>Evidence:</strong> {alert.evidence}
+                    </div>
+                  )}
+                  {alert.remediationSuggestion && (
+                    <div style={{ color: '#0284c7', fontWeight: '600', display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '14px' }}>💡</span>
+                      <span><strong>Steps to resolve:</strong> {alert.remediationSuggestion}</span>
+                    </div>
+                  )}
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid #f1f5f9', paddingTop: '8px', marginTop: '8px' }}>
+                    <div>
+                      {alert.sourceGrId && (
+                        <button 
+                          className="btn-view-reference" 
+                          onClick={() => {
+                            setSelectedReferenceHighlightKeyword(highlightWord);
+                            handleViewReferenceText(alert.sourceGrId);
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#0284c7',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: '600',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(2, 132, 199, 0.1)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          🔗 View Conflicting GR ({alert.sourceGrId})
+                        </button>
+                      )}
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {alert.autoResolvable && (
+                        <button 
+                          onClick={() => handleAutoResolve(alert)}
+                          disabled={resolvingAlertId === alert.id}
+                          style={{
+                            backgroundColor: '#ff9933',
+                            color: 'white',
+                            border: 'none',
+                            padding: '5px 10px',
+                            borderRadius: '4px',
+                            fontWeight: '600',
+                            fontSize: '12px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {resolvingAlertId === alert.id ? '⏳ Resolving...' : '🔧 Auto-Fix'}
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => resolveAlert(alert.id)}
+                        style={{
+                          backgroundColor: '#e2e8f0',
+                          color: '#334155',
+                          border: 'none',
+                          padding: '5px 10px',
+                          borderRadius: '4px',
+                          fontWeight: '600',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="workspace-container">
         {/* Left: Draft Editor */}
@@ -381,35 +561,7 @@ export default function DraftWorkspace({ currentGR, user }) {
             {renderSectionContent('introduction', gr.sections.introduction)}
           </div>
 
-          {/* References Section */}
-          <div className="section-card">
-            <div className="section-header">
-              <h4>References (संदर्भ)</h4>
-              <span className="count">{gr.sections.references?.length || 0}</span>
-            </div>
-            <div className="references-list">
-              {gr.sections.references?.map((ref, idx) => (
-                <div key={idx} className="ref-item">
-                  <a 
-                    href="#"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleViewReferenceText(ref.grNumber);
-                    }}
-                    className="ref-link"
-                    style={{
-                      color: '#ff9933',
-                      textDecoration: 'none',
-                      fontWeight: '600'
-                    }}
-                  >
-                    🔗 GR {ref.grNumber}
-                  </a>
-                  {ref.date && <span className="ref-date">{ref.date}</span>}
-                </div>
-              )) || <p>No references</p>}
-            </div>
-          </div>
+
 
           {/* Similar Resolutions (Historical context library) */}
           <div className="section-card">
@@ -472,7 +624,7 @@ export default function DraftWorkspace({ currentGR, user }) {
           </div>
 
           {/* Financials Section */}
-          {gr.sections.financials && gr.sections.financials.length > 0 && (
+          {gr.gr_type === '1_FINANCIAL_SANCTION' && gr.sections.financials && gr.sections.financials.length > 0 && (
             <div className="section-card">
               <div className="section-header">
                 <h4>Financial Details (वित्तीय तपशील)</h4>
@@ -481,12 +633,69 @@ export default function DraftWorkspace({ currentGR, user }) {
                 <tbody>
                   {gr.sections.financials.map((fin, idx) => (
                     <tr key={idx}>
-                      <td>{fin.description?.substring(0, 40)}</td>
+                      <td>{fin.description?.substring(0, 40) || 'Budget Head Allocation'}</td>
                       <td className="amount">₹{fin.amount}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Policy / Scheme Details Section */}
+          {gr.gr_type === '2_POLICY_SCHEME' && gr.inputPayload && (
+            <div className="section-card" style={{ padding: '16px 20px' }}>
+              <div className="section-header" style={{ marginBottom: '12px', borderBottom: '1px solid #eee', paddingBottom: '8px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#1a3a52' }}>Scheme & Policy Parameters (योजना व धोरण तपशील)</h4>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13.5px', color: '#1e293b', textAlign: 'left' }}>
+                <div><strong>Scheme Name:</strong> {gr.inputPayload.scheme_name || 'N/A'}</div>
+                <div><strong>Eligibility Criteria:</strong> {gr.inputPayload.eligibility_criteria || 'N/A'}</div>
+                <div><strong>Committee Chairman:</strong> {gr.inputPayload.committee_chairman || 'N/A'}</div>
+              </div>
+            </div>
+          )}
+
+          {/* HR / Establishment Details Section */}
+          {gr.gr_type === '3_HR_ESTABLISHMENT' && gr.inputPayload && (
+            <div className="section-card" style={{ padding: '16px 20px' }}>
+              <div className="section-header" style={{ marginBottom: '12px', borderBottom: '1px solid #eee', paddingBottom: '8px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#1a3a52' }}>HR & Placement Details (आस्थापना व पदस्थापना तपशील)</h4>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13.5px', color: '#1e293b', textAlign: 'left' }}>
+                <div><strong>Appointed Officer(s):</strong> {gr.inputPayload.employee_names_and_cadres || 'N/A'}</div>
+                <div><strong>Current Posting:</strong> {gr.inputPayload.current_posting || 'N/A'}</div>
+                <div><strong>New Posting / Assignment:</strong> {gr.inputPayload.new_posting || 'N/A'}</div>
+                <div><strong>Effective Date:</strong> {gr.inputPayload.effective_date || 'N/A'}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Statutory Notification Details Section */}
+          {gr.gr_type === '4_STATUTORY_NOTIFICATION' && gr.inputPayload && (
+            <div className="section-card" style={{ padding: '16px 20px' }}>
+              <div className="section-header" style={{ marginBottom: '12px', borderBottom: '1px solid #eee', paddingBottom: '8px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#1a3a52' }}>Statutory Scope (वैधानिक कार्यक्षेत्र तपशील)</h4>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13.5px', color: '#1e293b', textAlign: 'left' }}>
+                <div><strong>Parent Act Invoked:</strong> {gr.inputPayload.parent_act_invoked || 'N/A'}</div>
+                <div><strong>Geographic Scope:</strong> {gr.inputPayload.geographic_scope || 'N/A'}</div>
+                <div><strong>Exempted Entities:</strong> {gr.inputPayload.exempted_entities || 'N/A'}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Corrigendum Details Section */}
+          {gr.gr_type === '5_CORRIGENDUM' && gr.inputPayload && (
+            <div className="section-card" style={{ padding: '16px 20px' }}>
+              <div className="section-header" style={{ marginBottom: '12px', borderBottom: '1px solid #eee', paddingBottom: '8px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#1a3a52' }}>Corrigendum Corrections (शुद्धीपत्रक सुधारणा)</h4>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13.5px', color: '#1e293b', textAlign: 'left' }}>
+                <div><strong>Original GR Identification:</strong> {gr.inputPayload.original_gr_id || 'N/A'}</div>
+                <div><strong>Incorrect Text Reference:</strong> <span style={{ color: '#d32f2f', textDecoration: 'line-through' }}>{gr.inputPayload.incorrect_text_reference}</span></div>
+                <div><strong>Corrected Text Placement:</strong> <span style={{ color: '#27ae60', fontWeight: 'bold' }}>{gr.inputPayload.corrected_text_placement}</span></div>
+              </div>
             </div>
           )}
         </div>
@@ -528,73 +737,7 @@ export default function DraftWorkspace({ currentGR, user }) {
             </div>
           )}
 
-          <div className="pane-title">
-            <h3>⚠️ Verification Alerts (पडताळणी इशारे)</h3>
-          </div>
-
-          <div className="alerts-summary">
-            <div className="alert-badge critical">{alertCount.critical} Critical</div>
-            <div className="alert-badge high">{alertCount.high} High</div>
-            <div className="alert-badge medium">{alertCount.medium} Medium</div>
-            <div className="alert-badge low">{alertCount.low} Low</div>
-          </div>
-
-          <div className="alerts-list">
-            {alerts.length === 0 ? (
-              <div className="no-alerts">
-                <span className="icon">✅</span>
-                <p>All checks passed! (सर्व पडताळणी यशस्वी!)</p>
-              </div>
-            ) : (
-              alerts.map((alert, idx) => (
-                <div key={idx} className={`alert-card ${alert.severity}`}>
-                  <div className="alert-header">
-                    <span className="severity-badge" style={{ backgroundColor: severityColors[alert.severity] }}>
-                      {alert.severity.toUpperCase()}
-                    </span>
-                    <span className="category">{alert.category}</span>
-                  </div>
-                  <div className="alert-title">{alert.title}</div>
-                  <div className="alert-description">{alert.description}</div>
-                  {alert.evidence && (
-                    <div className="alert-evidence">
-                      <strong>Evidence:</strong> {alert.evidence}
-                    </div>
-                  )}
-                  {alert.remediationSuggestion && (
-                    <div className="alert-suggestion">
-                      💡 {alert.remediationSuggestion}
-                    </div>
-                  )}
-                  <div className="alert-actions" style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                    <button 
-                      className="auto-resolve-btn" 
-                      onClick={() => handleAutoResolve(alert)}
-                      disabled={resolvingAlertId === alert.id}
-                      style={{
-                        backgroundColor: '#ff9933',
-                        color: 'white',
-                        border: 'none',
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        fontWeight: '600',
-                        fontSize: '11px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      {resolvingAlertId === alert.id ? '⏳ Resolving...' : '✨ Auto Resolve'}
-                    </button>
-                    <button className="resolve-btn" onClick={() => resolveAlert(alert.id)}>
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          {/* Verification Alerts Section has been merged into the top warning banner */}
         </div>
       </div>
 
@@ -686,7 +829,7 @@ export default function DraftWorkspace({ currentGR, user }) {
                       Introduction (प्रस्तावना)
                     </h5>
                     <p style={{ fontSize: '13.5px', textIndent: '30px', margin: 0, textAlign: 'justify', whiteSpace: 'pre-wrap' }}>
-                      {selectedReferenceGR.sections.introduction}
+                      {renderHighlightedText(selectedReferenceGR.sections.introduction, selectedReferenceHighlightKeyword)}
                     </p>
                   </div>
                 )}
@@ -715,12 +858,12 @@ export default function DraftWorkspace({ currentGR, user }) {
                   {selectedReferenceGR.sections?.resolutions && selectedReferenceGR.sections.resolutions.length > 0 ? (
                     selectedReferenceGR.sections.resolutions.map((clause, idx) => (
                       <p key={idx} style={{ fontSize: '13.5px', textIndent: '30px', margin: '0 0 10px 0', textAlign: 'justify', whiteSpace: 'pre-wrap' }}>
-                        {clause.index || idx + 1}. {clause.text}
+                        {clause.index || idx + 1}. {renderHighlightedText(clause.text, selectedReferenceHighlightKeyword)}
                       </p>
                     ))
                   ) : (
                     <p style={{ fontSize: '13.5px', textIndent: '30px', margin: 0, textAlign: 'justify', whiteSpace: 'pre-wrap' }}>
-                      {selectedReferenceGR.sections?.resolution || 'The government hereby resolves to approve the proposals.'}
+                      {renderHighlightedText(selectedReferenceGR.sections?.resolution || 'The government hereby resolves to approve the proposals.', selectedReferenceHighlightKeyword)}
                     </p>
                   )}
                 </div>
@@ -778,7 +921,7 @@ export default function DraftWorkspace({ currentGR, user }) {
         </div>
       )}
 
-      {/* Fullscreen Submitting Overlay */}
+      {/* Fullscreen Submitting Overlay (Stepped Progress Checklist - HCI Concept) */}
       {submitting && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -786,31 +929,104 @@ export default function DraftWorkspace({ currentGR, user }) {
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'rgba(15, 23, 42, 0.85)',
+          background: 'rgba(15, 23, 42, 0.95)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 2000,
-          backdropFilter: 'blur(6px)',
-          color: 'white'
+          zIndex: 3000,
+          backdropFilter: 'blur(8px)',
+          color: 'white',
+          fontFamily: 'system-ui, -apple-system, sans-serif'
         }}>
-          <div className="submitting-spinner-box" style={{ textAlign: 'center' }}>
-            <div className="spinner" style={{
-              width: '60px',
-              height: '60px',
-              border: '6px solid rgba(255, 255, 255, 0.2)',
-              borderTop: '6px solid #ff9933',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-              marginBottom: '20px',
-              display: 'inline-block'
-            }}></div>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '20px', fontWeight: '700', letterSpacing: '0.5px' }}>
-              Submitting Resolution
+          <div style={{ textAlign: 'center', maxWidth: '500px', width: '90%' }}>
+            {/* Saffron-Green Tricolor Spinner with Pulsing Rajmudra Emblem */}
+            <div style={{ position: 'relative', width: '80px', height: '80px', margin: '0 auto 30px auto' }}>
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '80px',
+                height: '80px',
+                border: '6px solid rgba(255, 255, 255, 0.1)',
+                borderTop: '6px solid #FF671F',
+                borderBottom: '6px solid #046A38',
+                borderRadius: '50%',
+                animation: 'spin 1.5s linear infinite'
+              }}></div>
+              <img 
+                src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Emblem_of_Maharashtra.svg" 
+                alt="Rajmudra Emblem" 
+                style={{
+                  position: 'absolute',
+                  top: '15px',
+                  left: '15px',
+                  width: '50px',
+                  height: '50px',
+                  animation: 'pulse 2s ease-in-out infinite'
+                }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            </div>
+
+            <h3 style={{ fontSize: '22px', fontWeight: '800', margin: '0 0 10px 0', letterSpacing: '0.5px', color: '#FFFFFF' }}>
+              शासन निर्णय सादर करत आहे...
             </h3>
-            <p style={{ margin: 0, color: '#94a3b8', fontSize: '14px' }}>
-              Publishing documents and updating official queues...
+            <h4 style={{ fontSize: '15px', fontWeight: '500', margin: '0 0 25px 0', color: '#D4AF37' }}>
+              Submitting Resolution and Dispatching to Mantralaya...
+            </h4>
+
+            {/* Stepped Progress Checklist */}
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '8px',
+              padding: '20px',
+              textAlign: 'left',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              marginBottom: '20px'
+            }}>
+              {[
+                { step: 0, label: "Securing draft with 21-Digit check digit algorithm...", mr: "२१-अंकी संकेतांक सुरक्षा अल्गोरिदम लागू करत आहे..." },
+                { step: 1, label: "Generating digital integrity checksum verification hash...", mr: "डिजिटल अखंडता पडताळणी हॅश तयार करत आहे..." },
+                { step: 2, label: "Updating Departmental workflow & archive databases...", mr: "विभागीय कार्यप्रवाह आणि संग्रहण डेटाबेस अद्ययावत करत आहे..." },
+                { step: 3, label: "Dispatching copies to Finance, Law and Mantralaya desks...", mr: "वित्त, विधी आणि मंत्रालय वितरण कक्षांकडे प्रती पाठवत आहे..." },
+                { step: 4, label: "Finalizing sign-off and publishing to E-Gazette queue...", mr: "स्वाक्षरी मसुदा अंतिम करत आहे आणि ई-राजपत्र रांगेत पाठवत आहे..." }
+              ].map((item, idx) => {
+                const isPassed = submittingStep > item.step;
+                const isCurrent = submittingStep === item.step;
+                return (
+                  <div key={idx} style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '12px', 
+                    opacity: isPassed || isCurrent ? 1 : 0.35,
+                    transition: 'all 0.3s'
+                  }}>
+                    <span style={{ 
+                      fontSize: '14px',
+                      color: isPassed ? '#27ae60' : isCurrent ? '#ff9933' : '#94a3b8',
+                      fontWeight: 'bold'
+                    }}>
+                      {isPassed ? '✅' : isCurrent ? '⚡' : '○'}
+                    </span>
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: '600', color: isCurrent ? '#ff9933' : '#ffffff' }}>
+                        {item.label}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '1px' }}>
+                        {item.mr}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>
+              Updating official departmental queues. Please do not close this window.
             </p>
           </div>
         </div>

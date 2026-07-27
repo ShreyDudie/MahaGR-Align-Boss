@@ -98,6 +98,9 @@ async function initializeBackend() {
     verifier = new GRVerifier(indexer);
     console.log('✅ Verifier ready');
 
+    // Build Policy Knowledge Base
+    verifier.knowledgeBase.buildKnowledgeBase();
+
     // Initialize generator (requires API key)
     const geminiKey = process.env.GEMINI_API_KEY;
     const openrouterKey = process.env.OPENROUTER_API_KEY;
@@ -189,6 +192,16 @@ app.get('/api/districts', (req, res) => {
 
   const districts = indexer.getDistricts();
   res.json({ districts });
+});
+
+// Real-time field verification route
+app.post('/api/gr/verify-fields', (req, res) => {
+  const { fieldName, fieldValue, department } = req.body;
+  if (!verifier) {
+    return res.json({ valid: true, status: 'verified', message: '' });
+  }
+  const result = verifier.verifyField(fieldName, fieldValue, department);
+  res.json(result);
 });
 
 // Generate new GR
@@ -883,6 +896,128 @@ app.post('/api/similar-grs', (req, res) => {
     count: similar.length,
     similar,
   });
+});
+
+// Official HTML / Printable Document Export
+app.get('/api/gr/:grId/export/html', async (req, res) => {
+  try {
+    const grId = req.params.grId;
+    let gr = await getGR(grId);
+    if (!gr && indexer) {
+      gr = indexer.getGRById(grId);
+    }
+    if (!gr) {
+      return res.status(404).send('<h1>GR Document Not Found</h1>');
+    }
+
+    const dept = gr.department || gr.metadata?.departmentName || 'GOVERNMENT OF MAHARASHTRA';
+    const date = gr.metadata?.grDate || gr.metadata?.date || new Date().toISOString().split('T')[0];
+    const grNumber = gr.calculated_21_digit_gr_id || gr.id || '20260728114530120301';
+    const secToken = gr.security_checksum || 'SEC-MH-8F21A-2026';
+    const signee = gr.metadata?.signeeDesignation || 'Under Secretary to Government of Maharashtra';
+
+    const preambleMarathi = gr.sections?.preamble_marathi || gr.sections?.introduction || '';
+    const preambleEnglish = gr.sections?.preamble_english || '';
+    const clausesMarathi = gr.sections?.resolution_clauses_marathi || (gr.sections?.resolution ? gr.sections.resolution.split('\n') : []);
+    const clausesEnglish = gr.sections?.resolution_clauses_english || [];
+    const readText = gr.sections?.read_section_text || '';
+    const distText = gr.sections?.footer_distribution_text || '';
+    const historicalRefs = gr.historical_references || [];
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="mr">
+<head>
+  <meta charset="UTF-8">
+  <title>Government Resolution - ${grNumber}</title>
+  <style>
+    body { font-family: 'Inter', 'Noto Sans Devanagari', Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #111; }
+    .gr-page { max-width: 850px; margin: 0 auto; background: #fff; border: 2px solid #0A2540; padding: 40px 50px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-radius: 4px; position: relative; }
+    .tricolor-stripe { height: 8px; background: linear-gradient(90deg, #FF671F 0%, #FF671F 33%, #FFFFFF 33%, #FFFFFF 66%, #046A38 66%, #046A38 100%); margin-bottom: 25px; border-radius: 2px; }
+    .gov-header { text-align: center; border-bottom: 2px solid #D4AF37; padding-bottom: 15px; margin-bottom: 25px; }
+    .emblem-img { width: 75px; height: 75px; margin-bottom: 8px; }
+    .gov-title { font-size: 22px; font-weight: 800; color: #0A2540; margin: 0; letter-spacing: 0.5px; text-transform: uppercase; }
+    .dept-title { font-size: 16px; font-weight: 700; color: #FF671F; margin: 5px 0 0 0; }
+    .gr-meta-bar { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; background: #F8FAFC; padding: 10px 15px; border: 1px solid #E2E8F0; border-radius: 4px; margin-bottom: 20px; color: #334155; }
+    .sec-badge { font-family: monospace; font-weight: bold; color: #046A38; }
+    .section-title { font-size: 16px; font-weight: 700; color: #0A2540; border-bottom: 1.5px solid #0A2540; padding-bottom: 4px; margin-top: 25px; margin-bottom: 12px; }
+    .preamble-box { font-size: 14px; line-height: 1.7; text-align: justify; text-indent: 30px; margin-bottom: 15px; }
+    .clause-list { padding-left: 0; list-style: none; margin: 0; }
+    .clause-item { font-size: 14px; line-height: 1.7; margin-bottom: 10px; padding-left: 24px; text-indent: -24px; text-align: justify; }
+    .sign-off { margin-top: 40px; text-align: right; font-size: 14px; font-weight: 600; }
+    .footer-links { margin-top: 35px; border-top: 2px dashed #CBD5E1; padding-top: 15px; font-size: 12px; color: #475569; }
+    .ref-link { color: #0056b3; font-weight: 600; text-decoration: none; }
+    .ref-link:hover { text-decoration: underline; }
+    @media print {
+      body { background: white; padding: 0; }
+      .gr-page { border: none; box-shadow: none; padding: 20px; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="max-width: 850px; margin: 0 auto 15px auto; text-align: right;">
+    <button onclick="window.print()" style="background: #046A38; color: white; border: none; padding: 10px 20px; font-weight: bold; border-radius: 4px; cursor: pointer;">🖨️ Download / Print Official GR PDF</button>
+  </div>
+  <div class="gr-page">
+    <div class="tricolor-stripe"></div>
+    <div class="gov-header">
+      <img class="emblem-img" src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Emblem_of_Maharashtra.svg" alt="Rajmudra Emblem" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 100 100\'><circle cx=\'50\' cy=\'50\' r=\'45\' fill=\'%23D4AF37\'/><text x=\'50\' y=\'55\' font-size=\'14\' text-anchor=\'middle\' fill=\'%230A2540\' font-weight=\'bold\'>राजमुद्रा</text></svg>'"/>
+      <h1 class="gov-title">महाराष्ट्र शासन (Government of Maharashtra)</h1>
+      <h2 class="dept-title">${dept}</h2>
+    </div>
+
+    <div class="gr-meta-bar">
+      <div><strong>२१-अंकी संगणक संकेतांक (21-Digit GR ID):</strong> ${grNumber}</div>
+      <div><strong>दिनांक:</strong> ${date}</div>
+      <div><strong>सुरक्षा टोकन:</strong> <span class="sec-badge">${secToken}</span></div>
+    </div>
+
+    ${readText ? `<div class="section-title">संदर्भ (References)</div><pre style="font-family: inherit; font-size: 13.5px; white-space: pre-wrap; background: #f9fafb; padding: 10px; border-left: 3px solid #0A2540; margin-bottom: 20px;">${readText}</pre>` : ''}
+
+    <div class="section-title">प्रस्तावना (Preamble)</div>
+    ${preambleMarathi ? `<div class="preamble-box">${preambleMarathi}</div>` : ''}
+    ${preambleEnglish ? `<div class="preamble-box" style="font-style: italic; color: #334155;">${preambleEnglish}</div>` : ''}
+
+    <div class="section-title">शासकीय निर्णय (Resolution Clauses)</div>
+    <ul class="clause-list">
+      ${clausesMarathi.map(c => `<li class="clause-item">${c}</li>`).join('')}
+    </ul>
+
+    ${clausesEnglish.length > 0 ? `
+      <div style="margin-top: 15px; font-weight: 600; color: #475569; font-size: 13px;">English Translation of Clauses:</div>
+      <ul class="clause-list" style="color: #334155; font-style: italic;">
+        ${clausesEnglish.map(c => `<li class="clause-item">${c}</li>`).join('')}
+      </ul>
+    ` : ''}
+
+    <div class="sign-off">
+      <p>महाराष्ट्राचे राज्यपाल यांच्या आदेशानुसार व नावाने,</p>
+      <br/><br/>
+      <p style="text-decoration: underline; font-size: 15px;">(${gr.metadata?.signeeName || 'स्वाक्षरी'})</p>
+      <p>${signee}<br/>महाराष्ट्र शासन</p>
+    </div>
+
+    ${distText ? `
+      <div class="section-title">प्रत माहिती व कार्यवाहीसाठी (Distribution)</div>
+      <pre style="font-family: inherit; font-size: 13px; white-space: pre-wrap; background: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 4px;">${distText}</pre>
+    ` : ''}
+
+    ${historicalRefs.length > 0 ? `
+      <div class="footer-links">
+        <strong>📋 अस्सल संदर्भ ऐतिहासिक शासन निर्णय (Historical Reference GRs Cited by AI):</strong>
+        <ul style="margin: 5px 0 0 0; padding-left: 20px;">
+          ${historicalRefs.map(r => `<li><a class="ref-link" href="${r.linkUrl}" target="_blank">${r.grNumber} - ${r.subject} (${r.department})</a></li>`).join('')}
+        </ul>
+      </div>
+    ` : ''}
+  </div>
+</body>
+</html>`;
+
+    res.send(htmlContent);
+  } catch (error) {
+    res.status(500).send(`<h1>Error generating GR HTML: ${error.message}</h1>`);
+  }
 });
 
 // List GRs

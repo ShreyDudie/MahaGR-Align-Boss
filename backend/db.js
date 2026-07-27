@@ -5,7 +5,6 @@
 
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
-import path from 'path';
 
 let db = null;
 
@@ -46,6 +45,7 @@ export async function initDB(dbPath = './backend/data/maharashtra-gr.db') {
       category TEXT NOT NULL,
       title TEXT NOT NULL,
       description TEXT,
+      source_gr_id TEXT,
       resolved INTEGER DEFAULT 0,
       resolved_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -77,6 +77,13 @@ export async function initDB(dbPath = './backend/data/maharashtra-gr.db') {
     CREATE INDEX IF NOT EXISTS idx_alerts_gr_id ON gr_alerts(gr_id);
     CREATE INDEX IF NOT EXISTS idx_alerts_severity ON gr_alerts(severity);
   `);
+
+  // Safely alter existing table to add source_gr_id column if it doesn't exist
+  try {
+    await db.exec('ALTER TABLE gr_alerts ADD COLUMN source_gr_id TEXT');
+  } catch {
+    // Ignore error if column already exists
+  }
 
   return db;
 }
@@ -137,9 +144,9 @@ export async function saveAlerts(grId, alerts) {
 
   for (const alert of alerts) {
     await db_instance.run(
-      `INSERT INTO gr_alerts (gr_id, severity, category, title, description)
-       VALUES (?, ?, ?, ?, ?)`,
-      [grId, alert.severity, alert.category, alert.title, alert.description]
+      `INSERT INTO gr_alerts (gr_id, severity, category, title, description, source_gr_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [grId, alert.severity, alert.category, alert.title, alert.description, alert.sourceGrId || null]
     );
   }
 }
@@ -150,12 +157,23 @@ export async function saveAlerts(grId, alerts) {
 export async function getAlerts(grId) {
   const db_instance = await initDB();
 
-  const alerts = await db_instance.all(
+  const rows = await db_instance.all(
     'SELECT * FROM gr_alerts WHERE gr_id = ? AND resolved = 0 ORDER BY severity DESC',
     [grId]
   );
 
-  return alerts;
+  return rows.map(row => ({
+    id: row.id,
+    grId: row.gr_id,
+    severity: row.severity,
+    category: row.category,
+    title: row.title,
+    description: row.description,
+    sourceGrId: row.source_gr_id,
+    resolved: row.resolved,
+    resolvedAt: row.resolved_at,
+    createdAt: row.created_at
+  }));
 }
 
 /**

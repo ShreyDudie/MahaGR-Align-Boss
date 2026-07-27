@@ -1,11 +1,9 @@
-/**
- * GR Verifier Service
- * Verifies generated GRs against historical records for conflicts and violations
- */
+import PolicyKnowledgeBase from './policyKnowledgeBase.js';
 
 export class GRVerifier {
   constructor(indexer) {
     this.indexer = indexer;
+    this.knowledgeBase = new PolicyKnowledgeBase(indexer);
     this.alerts = [];
   }
 
@@ -24,6 +22,12 @@ export class GRVerifier {
     this._checkDistrictJurisdiction(draftGR);
     this._checkFinancialOverrun(draftGR);
     this._checkTemporalConflicts(draftGR);
+    this._checkPolicyKnowledgeBaseConflicts(draftGR);
+    // Assign unique IDs to each alert if missing
+    this.alerts = this.alerts.map((a, idx) => ({
+      ...a,
+      id: a.id || `${a.category || 'alert'}-${idx}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+    }));
 
     const hasCategory = (cat) => this.alerts.some(a => a.category === cat);
 
@@ -370,6 +374,84 @@ export class GRVerifier {
     return gr.sections.financials.reduce((sum, fin) => {
       return sum + (fin.amountNumeric || 0);
     }, 0);
+  }
+
+  /**
+   * Check for policy conflicts using the PolicyKnowledgeBase
+   */
+  _checkPolicyKnowledgeBaseConflicts(draftGR) {
+    const auditResult = this.knowledgeBase.auditPolicyConflicts(draftGR);
+    if (auditResult.has_conflict && auditResult.conflicted_grs) {
+      auditResult.conflicted_grs.forEach(c => {
+        let sev = 'warning';
+        if (c.severity === 'CRITICAL') {
+          sev = 'critical';
+        } else if (c.severity === 'HIGH') {
+          sev = 'high';
+        }
+
+        this.alerts.push({
+          severity: sev,
+          category: 'conflict',
+          title: `Policy Conflict: ${c.department}`,
+          description: c.reason,
+          conflictingPhrase: draftGR.metadata?.subject || '',
+          remediationSuggestion: `Review references or mandates in ${c.grNumber} and coordinate across departments if necessary.`,
+          sourceGrId: c.grNumber, // Links to precursor GR
+        });
+      });
+    }
+  }
+
+  /**
+   * Real-time verification of individual form input fields against historical GR indexer
+   */
+  verifyField(fieldName, fieldValue, _department) {
+    if (!fieldValue || String(fieldValue).trim().length === 0) {
+      return { valid: true, status: 'empty', message: '' };
+    }
+
+    const val = String(fieldValue).trim();
+
+    if (fieldName === 'budget_head_15_digit' || fieldName === 'accountHead') {
+      const isFormatValid = /^\d{4}-\d{2}-\d{3}-\d{2}-\d{2}$/.test(val) || /^\d{4}/.test(val);
+      let foundInDB = false;
+
+      if (this.indexer) {
+        foundInDB = this.indexer.grs.some(gr => 
+          gr.sections?.financials?.some(f => f.accountHead && f.accountHead.includes(val))
+        );
+      }
+
+      if (foundInDB) {
+        return { valid: true, status: 'verified', message: '✅ Active 15-digit Budget Head verified in historical records.' };
+      } else if (isFormatValid) {
+        return { valid: true, status: 'warning', message: 'ℹ️ Valid format, but not recently used in this department.' };
+      } else {
+        return { valid: false, status: 'error', message: '⚠️ Invalid format. Expected 15-digit format: e.g. 2202-01-101-01-03' };
+      }
+    }
+
+    if (fieldName === 'drawing_disbursing_officer') {
+      let matches = [];
+      if (this.indexer) {
+        matches = this.indexer.search({ query: val, limit: 3 });
+      }
+      if (matches.length > 0) {
+        return { valid: true, status: 'verified', message: `✅ Verified Officer title (Matches ${matches.length} historical GRs)` };
+      }
+      return { valid: true, status: 'info', message: 'ℹ️ Custom DDO Title' };
+    }
+
+    if (fieldName === 'precise_amount_inr' || fieldName === 'budget') {
+      const num = Number(val);
+      if (num > 40000000) {
+        return { valid: false, status: 'critical', message: `🚨 CRITICAL: ₹${(num / 10000000).toFixed(2)} Crores exceeds Parent Finance Cap (₹4.00 Crores). Requires Cabinet approval.` };
+      }
+      return { valid: true, status: 'verified', message: '✅ Amount within standard departmental sanction ceiling.' };
+    }
+
+    return { valid: true, status: 'verified', message: '✅ Valid input' };
   }
 }
 

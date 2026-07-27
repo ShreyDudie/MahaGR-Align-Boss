@@ -534,14 +534,62 @@ export default function Dashboard({ user, setCurrentGR }) {
 
       </div>
 
-      {/* Historical Departments statistics summary */}
-      <div className="recent-activity">
-        <h3 style={{ color: '#1a3a52', marginBottom: '16px' }}>Top Departments (Historical Database)</h3>
-        <div className="dept-list">
+      {/* Top Departments Visual Card Grid */}
+      <div className="recent-activity" style={{ padding: '24px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
+        <h3 style={{ color: '#0A2540', marginBottom: '16px', fontSize: '18px', fontWeight: '800' }}>
+          🏛️ Key Administrative Departments (Historical GR Index)
+        </h3>
+        <p style={{ fontSize: '13px', color: '#64748B', marginTop: '-10px', marginBottom: '20px' }}>
+          Click any department card to explore historical Government Resolutions and precursor policies.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
           {stats.departments.map((dept, idx) => (
-            <div key={idx} className="dept-item">
-              <div className="dept-name">{dept.name.replace(/_/g, ' ')}</div>
-              <div className="dept-count">{dept.count.toLocaleString()} GRs</div>
+            <div 
+              key={idx} 
+              style={{
+                background: '#FFFFFF',
+                border: '1.5px solid #CBD5E1',
+                borderRadius: '8px',
+                padding: '16px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onClick={() => {
+                setSearchParams({ keyword: '', department: dept.name });
+                setSearching(true);
+                setSearchTriggered(true);
+                axios.post('http://localhost:5000/api/search', { department: dept.name }).then(res => {
+                  setSearchResults(res.data.results || []);
+                  setSearching(false);
+                });
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '24px' }}>
+                    {dept.name.toLowerCase().includes('finance') ? '💰' : 
+                     dept.name.toLowerCase().includes('education') ? '🎓' : 
+                     dept.name.toLowerCase().includes('urban') ? '🏙️' : 
+                     dept.name.toLowerCase().includes('health') ? '🏥' : '📜'}
+                  </span>
+                  <span style={{ background: '#FF671F', color: 'white', padding: '3px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+                    {dept.count.toLocaleString()} GRs
+                  </span>
+                </div>
+                <div style={{ fontSize: '15px', fontWeight: '700', color: '#0A2540', marginBottom: '6px' }}>
+                  {dept.name.replace(/_/g, ' ')}
+                </div>
+              </div>
+
+              <div style={{ marginTop: '12px', borderTop: '1px solid #F1F5F9', paddingTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#0056b3', fontWeight: 'bold' }}>
+                <span>Browse Resolutions</span>
+                <span>→</span>
+              </div>
             </div>
           ))}
         </div>

@@ -305,14 +305,14 @@ export class GRIndexer {
   /**
    * Get GRs related to a topic over time (for timeline visualization)
    */
-  getPolicyEvolution(keyword, years = 6) {
+  getPolicyEvolution(keyword, _years = 6) {
     const evolution = [];
     const keywordMatches = this.indices.byKeyword.get(keyword.toLowerCase()) || [];
 
     keywordMatches.forEach(grId => {
       const gr = this.getGRById(grId);
       if (gr && gr.metadata.date) {
-        const [day, month, year] = gr.metadata.date.split('-');
+        const [_day, month, year] = gr.metadata.date.split('-');
         evolution.push({
           grId,
           date: gr.metadata.date,
