@@ -1,6 +1,10 @@
 /**
  * Policy Knowledge Base Engine
  * Extracts and audits inter-departmental policy rules across 98,000+ Maharashtra GRs
+ *
+ * CHANGES FOR METADATA-AWARE RAG:
+ * - Added lookup helpers to validate budget heads, DDOs, and schemes by department
+ * - These helpers are used by the generator to ensure financial metadata is not copied across departments
  */
 
 const GENERIC_ADMIN_STOPWORDS = new Set([
@@ -266,6 +270,76 @@ export class PolicyKnowledgeBase {
 
     this.initialized = true;
     console.log(`✅ Policy Knowledge Base initialized across ${this.indexer.grs.length} GRs and 33 Departments`);
+  }
+
+  /**
+   * Lookup helpers for external services.
+   * - validateBudgetHeadForDepartment: returns true if a budget head (full or major prefix) is historically linked to the given department
+   * - getBudgetHeadCandidates: returns list of known budget heads for a department
+   * - validateDDOForDepartment: checks if a DDO string appears in historical GRs of that department
+   * - getSchemeOwners: returns departments that commonly own the scheme words
+   */
+  validateBudgetHeadForDepartment(budgetHead, department) {
+    if (!budgetHead || !department) return false;
+    // Check full account head matches
+    const hits = this.budgetRegistry.get(budgetHead) || [];
+    if (hits.some(h => h.department === department)) return true;
+
+    // Fallback: check major head prefix
+    const majorMatch = budgetHead.match(/^(\d{4})/);
+    if (majorMatch) {
+      const major = majorMatch[1];
+      const rule = this.ruleConstitution.budgetHeadRules.get(major);
+      if (rule && rule.ownerDepartment === department) return true;
+
+      const deptMap = this.majorHeadToDeptsMap.get(major);
+      if (deptMap && deptMap.has(department)) return true;
+    }
+
+    return false;
+  }
+
+  getBudgetHeadCandidatesForDepartment(department) {
+    if (!department) return [];
+    const results = [];
+    this.budgetRegistry.forEach((arr, head) => {
+      if (arr.some(a => a.department === department)) results.push(head);
+    });
+    return results.slice(0, 50);
+  }
+
+  validateDDOForDepartment(ddo, department) {
+    if (!ddo || !department) return false;
+    // Simple substring match against known ddo_candidates in indexer
+    for (const gr of this.indexer.grs) {
+      if ((gr.department || '') === department) {
+        const ddos = (gr.metadata?.ddo_candidates || []).map(d => d.toLowerCase());
+        if (ddos.some(d => d.includes(ddo.toLowerCase()) || d === ddo.toLowerCase())) return true;
+      }
+    }
+    return false;
+  }
+
+  getDDOCandidatesForDepartment(department) {
+    const set = new Set();
+    if (!department) return [];
+    this.indexer.grs.forEach(gr => {
+      if ((gr.department || '') === department) {
+        (gr.metadata?.ddo_candidates || []).forEach(d => set.add(d));
+      }
+    });
+    return Array.from(set).slice(0, 50);
+  }
+
+  getSchemeOwners(schemeWord) {
+    if (!schemeWord) return [];
+    const entry = this.ruleConstitution.activeSchemes.get(schemeWord);
+    if (entry) return [{ department: entry.ownerDepartment, establishedByGr: entry.establishedByGr }];
+    // fallback: scan schemeRegistry
+    const hits = this.schemeRegistry.get(schemeWord) || [];
+    const counts = {};
+    hits.forEach(h => { counts[h.department] = (counts[h.department] || 0) + 1; });
+    return Object.keys(counts).map(d => ({ department: d, count: counts[d] })).sort((a,b)=>b.count-a.count);
   }
 
   /**

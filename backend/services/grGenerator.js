@@ -1,13 +1,18 @@
 /**
  * GR Generator Service
  * Ultimate Digital Desk Officer & Policy Auditor for Govt of Maharashtra
+ *
+ * CHANGES FOR METADATA-AWARE RAG:
+ * - Validates budget head, DDO and scheme against PolicyKnowledgeBase before using them
+ * - Constructs LLM prompts that forbid inventing financial/account metadata
+ * - Leaves budget/DDO/account fields blank or "Unknown" when validation fails
  */
 
 import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'crypto';
 import PolicyKnowledgeBase from './policyKnowledgeBase.js';
 
-export class GRGenerator {
+export class grGenerator {
   constructor(indexer, config) {
     this.indexer = indexer;
     this.knowledgeBase = new PolicyKnowledgeBase(indexer);
@@ -219,6 +224,47 @@ export class GRGenerator {
     // Step A: Run Policy & Conflict Audit FIRST
     const auditResult = this._auditConflicts(inputData);
 
+    // Step A.5: Validate metadata fields against Knowledge Base and ensure department consistency
+    const dept = inputData.department_name || inputData.department || '';
+    const validated = {
+      budget_head: null,
+      ddo: null,
+      scheme: null,
+      account_head_valid: false,
+      ddo_valid: false
+    };
+
+    if (inputData.budget_head_15_digit) {
+      if (this.knowledgeBase.validateBudgetHeadForDepartment(inputData.budget_head_15_digit, dept)) {
+        validated.budget_head = inputData.budget_head_15_digit;
+        validated.account_head_valid = true;
+      } else {
+        // Do not copy invalid budget heads from retrieved GRs; leave null
+        validated.budget_head = null;
+        validated.account_head_valid = false;
+      }
+    }
+
+    if (inputData.drawing_disbursing_officer) {
+      if (this.knowledgeBase.validateDDOForDepartment(inputData.drawing_disbursing_officer, dept)) {
+        validated.ddo = inputData.drawing_disbursing_officer;
+        validated.ddo_valid = true;
+      } else {
+        validated.ddo = null;
+        validated.ddo_valid = false;
+      }
+    }
+
+    if (inputData.scheme_name) {
+      // check which department typically owns this scheme
+      const owners = this.knowledgeBase.getSchemeOwners(inputData.scheme_name.toLowerCase());
+      if (owners.length > 0 && (!owners[0].department || owners[0].department === dept)) {
+        validated.scheme = inputData.scheme_name;
+      } else {
+        validated.scheme = null;
+      }
+    }
+
     // Find similar GRs from indexer for style context
     const draftQueryObj = {
       id: grId,
@@ -241,7 +287,13 @@ export class GRGenerator {
       structuredOutput = this._generateFallbackGR(inputData, auditResult, grId, secToken);
     } else {
       try {
-        const prompt = this._buildJsonPrompt(inputData, styleContext, auditResult, grId);
+        // Build prompt with validated metadata only. Fields not validated are set to 'Unknown' or left empty.
+        const safeInput = { ...inputData };
+        safeInput.budget_head_15_digit = validated.account_head_valid ? validated.budget_head : '';
+        safeInput.drawing_disbursing_officer = validated.ddo_valid ? validated.ddo : '';
+        safeInput.scheme_name = validated.scheme || '';
+
+        const prompt = this._buildJsonPrompt(safeInput, styleContext, auditResult, grId);
 
         let responseText = '';
         if (this.config.type === 'gemini') {
@@ -413,11 +465,12 @@ export class GRGenerator {
         resolution_clauses_english: structuredOutput.resolution_clauses_english || [],
         resolution: (structuredOutput.resolution_clauses_marathi || []).join('\n'),
         resolutions: (structuredOutput.resolution_clauses_marathi || []).map((text, idx) => ({ text, index: idx + 1 })),
+        // Only include validated financial metadata. Unvalidated fields are left blank to avoid copying from unrelated departments.
         financials: inputData.precise_amount_inr ? [{
           type: 'allocation',
           amount: inputData.precise_amount_inr,
-          accountHead: inputData.budget_head_15_digit,
-          ddo: inputData.drawing_disbursing_officer
+          accountHead: validated.account_head_valid ? validated.budget_head : '',
+          ddo: validated.ddo_valid ? validated.ddo : ''
         }] : [],
         distribution: (structuredOutput.footer_distribution_list || []).map((recipient, idx) => ({ order: idx + 1, recipient })),
         footer_distribution_text: structuredOutput.footer_distribution_text || ''
@@ -490,9 +543,15 @@ STRICT CONSTRAINTS:
     "Query 1",
     "Query 2",
     "Query 3"
+  ],
+  "metadata_handling_rules": [
+    "The LLM MUST NOT invent or hallucinate any Budget Heads, DDO names, Financial Codes, Government Codes, or Account Heads.",
+    "Use only the validated metadata values provided in the INPUT VARIABLES above. If a field is empty or not validated, set it to an empty string or the literal value 'Unknown'.",
+    "Do NOT copy metadata values from retrieved historical GR examples unless they are explicitly validated and present in the INPUT VARIABLES.",
+    "The LLM is only responsible for legal language, preamble, resolution clauses, formatting, and administrative wording. All numeric codes and officer/designation fields must come from validated inputs only."
   ]
 }`;
   }
 }
 
-export default GRGenerator;
+export default grGenerator;

@@ -1,6 +1,11 @@
 /**
  * GR Indexer Service
  * Builds searchable indices of all Government Resolutions
+ *
+ * CHANGES FOR METADATA-AWARE RAG:
+ * - Extracts structured metadata (budget_heads, ddo_candidates, scheme_words, financial_year)
+ * - Populates indices usable for department-aware retrieval and validation
+ * - Keeps backward-compatible indices used elsewhere in the codebase
  */
 
 export class GRIndexer {
@@ -33,13 +38,32 @@ export class GRIndexer {
         this.indices.byDepartment.get(gr.department).push(gr.id);
       }
 
-      // Index by year from metadata date
+      // Index by year from metadata date and compute financial year
       if (gr.metadata.date) {
-        const year = gr.metadata.date.split('-')[2];
+        const parts = String(gr.metadata.date).split('-');
+        const year = parts[parts.length - 1];
         if (!this.indices.byYear.has(year)) {
           this.indices.byYear.set(year, []);
         }
         this.indices.byYear.get(year).push(gr.id);
+
+        // Compute simple financial year (e.g., 2023-24) from month name/number when possible
+        try {
+          const monthPart = parts[1] || '';
+          const monthLower = monthPart.toString().toLowerCase();
+          const monthMap = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+          let month = parseInt(monthPart, 10);
+          if (isNaN(month)) {
+            Object.keys(monthMap).forEach(k => { if (monthLower.startsWith(k)) month = monthMap[k]; });
+          }
+          if (!isNaN(month) && month > 0) {
+            const y = parseInt(year, 10);
+            const fyStart = month <= 3 ? y - 1 : y;
+            gr.metadata.financial_year = `${fyStart}-${String(fyStart + 1).slice(-2)}`;
+          }
+        } catch (e) {
+          // ignore
+        }
       }
 
       // Index by districts
@@ -70,6 +94,7 @@ export class GRIndexer {
       // Index by keywords from subject
       if (gr.metadata.subject) {
         const keywords = this._extractKeywords(gr.metadata.subject);
+        gr.metadata.keywords = keywords;
         keywords.forEach(keyword => {
           if (!this.indices.byKeyword.has(keyword)) {
             this.indices.byKeyword.set(keyword, []);
@@ -78,17 +103,61 @@ export class GRIndexer {
         });
       }
 
-      // Index by account heads
+      // Ensure metadata containers for structured fields
+      if (!gr.metadata.budget_heads) gr.metadata.budget_heads = [];
+      if (!gr.metadata.ddo_candidates) gr.metadata.ddo_candidates = [];
+      if (!gr.metadata.scheme_words) gr.metadata.scheme_words = [];
+
+      // Index by account heads and extract budget head metadata
       if (gr.sections.financials) {
         const seenAccountHeads = new Set();
         gr.sections.financials.forEach(fin => {
-          if (fin.accountHead && !seenAccountHeads.has(fin.accountHead)) {
-            seenAccountHeads.add(fin.accountHead);
-            if (!this.indices.byAccountHead.has(fin.accountHead)) {
-              this.indices.byAccountHead.set(fin.accountHead, []);
+          // Normalize possible accountHead field
+          const accountHead = fin.accountHead || fin.account_head || fin.accountHeadRaw;
+          if (accountHead) {
+            if (!seenAccountHeads.has(accountHead)) {
+              seenAccountHeads.add(accountHead);
+              if (!this.indices.byAccountHead.has(accountHead)) {
+                this.indices.byAccountHead.set(accountHead, []);
+              }
+              this.indices.byAccountHead.get(accountHead).push(gr.id);
             }
-            this.indices.byAccountHead.get(fin.accountHead).push(gr.id);
+
+            // Add to structured metadata for this GR
+            if (!gr.metadata.budget_heads.includes(accountHead)) {
+              gr.metadata.budget_heads.push(accountHead);
+            }
           }
+
+          // Heuristic: attempt to find DDO mentions in context
+          if (fin.context && /drawing\s*&?\s*disbursing|ddo|drawing disbursing officer/i.test(fin.context)) {
+            const match = fin.context.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/);
+            if (match && match[1]) {
+              gr.metadata.ddo_candidates.push(match[1].trim());
+            }
+          }
+        });
+      }
+
+      // Additional heuristic: scan distribution list for DDO titles or officer names
+      if (gr.sections.distribution) {
+        gr.sections.distribution.forEach(d => {
+          const r = d.recipient || '';
+          if (/drawing\s*&?\s*disbursing|ddo|accountant general|pay and accounts officer|director of/i.test(r.toLowerCase())) {
+            gr.metadata.ddo_candidates.push(r.trim());
+          }
+        });
+      }
+
+      // Derive simple scheme words from subject for quick matching
+      if (gr.metadata.subject) {
+        const schemeWords = this._extractKeywords(gr.metadata.subject).slice(0, 6);
+        gr.metadata.scheme_words = schemeWords;
+        schemeWords.forEach(word => {
+          if (!this.indices.byKeyword.has(word)) {
+            this.indices.byKeyword.set(word, []);
+          }
+          this.indices.byKeyword.get(word).push(gr.id);
         });
       }
 

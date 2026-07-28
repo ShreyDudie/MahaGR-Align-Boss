@@ -1,6 +1,11 @@
 /**
  * GR Assistant Service
  * Conversational AI Search & Policy Synthesis Engine across 98,000+ Maharashtra GRs
+ *
+ * CHANGES FOR METADATA-AWARE RAG:
+ * - Department-first retrieval: filter by explicit or inferred department before ranking
+ * - Ranking adjusted: Department Match -> Scheme Match -> Subject Match -> Similarity
+ * - Prevents retrieval from unrelated departments unless no department candidates are found
  */
 
 export class GRAssistant {
@@ -57,34 +62,70 @@ export class GRAssistant {
       }
     });
 
-    // Score all GRs based on keyword matches & domain boost
-    const scoredGRs = [];
+    // Check if user explicitly specified a department (syntax: "department: Dept_Name")
+    let explicitDepartment = null;
+    const deptMatch = userQuery.match(/department:\s*([A-Za-z0-9_,\-\s]+)/i);
+    if (deptMatch) {
+      explicitDepartment = deptMatch[1].trim();
+    }
 
-    this.indexer.grs.forEach(gr => {
+    // Department-aware retrieval: prefer GRs from the chosen department first.
+    let candidateGRs = [];
+    if (explicitDepartment) {
+      candidateGRs = (this.indexer.indices.byDepartment.get(explicitDepartment) || []).map(id => this.indexer.getGRById(id)).filter(Boolean);
+    } else if (targetDepts.size > 0) {
+      // Use first inferred target department to avoid cross-department bleed
+      const primaryDept = Array.from(targetDepts)[0];
+      candidateGRs = (this.indexer.indices.byDepartment.get(primaryDept) || []).map(id => this.indexer.getGRById(id)).filter(Boolean);
+    } else {
+      // No strong department signal: search across all GRs but rank by dept/schema/subject
+      candidateGRs = [...this.indexer.grs];
+    }
+
+    // Scoring: Department Match -> Scheme Match -> Subject Match -> Keyword Overlap
+    const scored = [];
+    candidateGRs.forEach(gr => {
       let score = 0;
+      const dept = gr.department || '';
       const subject = (gr.metadata?.subject || '').toLowerCase();
-      const dept = (gr.department || '').toLowerCase();
-      const resolutions = (gr.sections?.resolutions?.map(r => r.text).join(' ') || '').toLowerCase();
+      const schemeWords = (gr.metadata?.scheme_words || []).map(s => s.toLowerCase());
 
-      keywords.forEach(word => {
-        if (subject.includes(word)) score += 25;
-        if (dept.includes(word)) score += 10;
-        if (resolutions.includes(word)) score += 3;
-      });
+      if (explicitDepartment && dept === explicitDepartment) score += 100;
+      if (!explicitDepartment && targetDepts.has(dept)) score += 50;
 
-      if (targetDepts.has(gr.department)) {
-        score += 30;
-      }
+      // Scheme match bonus
+      const schemeMatchCount = keywords.filter(k => schemeWords.includes(k)).length;
+      score += schemeMatchCount * 30;
 
-      if (score > 0) {
-        scoredGRs.push({ gr, score });
-      }
+      // Subject/keyword overlap
+      const subjectMatchCount = keywords.filter(k => subject.includes(k)).length;
+      score += subjectMatchCount * 10;
+
+      // Recent doc small boost
+      try {
+        const year = gr.metadata?.date ? parseInt(String(gr.metadata.date).split('-').slice(-1)[0]) : 0;
+        if (year && year >= new Date().getFullYear() - 2) score += 5;
+      } catch (e) {}
+
+      if (score > 0) scored.push({ gr, score });
     });
 
-    // Sort by score descending
-    scoredGRs.sort((a, b) => b.score - a.score);
+    scored.sort((a, b) => b.score - a.score);
 
-    return scoredGRs.map(item => item.gr).slice(0, 6);
+    // If no department candidates found and user didn't restrict, allow cross-department fallback
+    let results = scored.map(s => s.gr).slice(0, 12);
+    if (results.length === 0 && !explicitDepartment) {
+      const fallback = [];
+      this.indexer.grs.forEach(gr => {
+        const subject = (gr.metadata?.subject || '').toLowerCase();
+        const subjectMatchCount = keywords.filter(k => subject.includes(k)).length;
+        if (subjectMatchCount > 0) fallback.push({ gr, score: subjectMatchCount });
+      });
+      fallback.sort((a, b) => b.score - a.score);
+      results = fallback.map(s => s.gr).slice(0, 6);
+    }
+
+    return results.slice(0, 6);
   }
 
   /**
