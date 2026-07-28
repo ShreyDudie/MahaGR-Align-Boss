@@ -209,11 +209,15 @@ export default function DraftWorkspace({ currentGR }) {
     );
   };
 
-  const resolveAlert = (alertId) => {
-    setAlerts(prev => prev.filter(a => a.id !== alertId));
+  const resolveAlert = (alertId, targetIdx) => {
+    setAlerts(prev => prev.filter((a, idx) => (a.id ? a.id !== alertId : idx !== targetIdx)));
   };
 
   const handleSubmit = async () => {
+    if (alerts.length > 0) {
+      alert(`⚠️ Please resolve (Auto-Fix) or dismiss all ${alerts.length} alerts before submitting.`);
+      return;
+    }
     setSubmitting(true);
     setSubmittingStep(0);
     const interval = setInterval(() => {
@@ -509,7 +513,7 @@ export default function DraftWorkspace({ currentGR }) {
                         </button>
                       )}
                       <button 
-                        onClick={() => resolveAlert(alert.id)}
+                        onClick={() => resolveAlert(alert.id, idx)}
                         style={{
                           backgroundColor: '#e2e8f0',
                           color: '#334155',
@@ -741,9 +745,28 @@ export default function DraftWorkspace({ currentGR }) {
         </div>
       </div>
 
-      <div className="workspace-footer">
-        <button className="btn-cancel" onClick={handleCancel}>Cancel</button>
-        <button className="btn-submit" onClick={handleSubmit}>Submit for Review</button>
+      <div className="workspace-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          {alerts.length > 0 && (
+            <span style={{ color: '#d97706', fontSize: '13px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#fef3c7', padding: '6px 12px', borderRadius: '4px', border: '1px solid #f59e0b' }}>
+              ⚠️ Resolve (Auto-Fix) or Dismiss all alerts ({alerts.length}) before submitting
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button className="btn-cancel" onClick={handleCancel}>Cancel</button>
+          <button 
+            className="btn-submit" 
+            onClick={handleSubmit}
+            disabled={alerts.length > 0 || submitting}
+            style={{
+              opacity: (alerts.length > 0 || submitting) ? 0.6 : 1,
+              cursor: (alerts.length > 0 || submitting) ? 'not-allowed' : 'pointer'
+            }}
+          >
+            Submit for Review
+          </button>
+        </div>
       </div>
 
 

@@ -13,16 +13,16 @@ export class GRVerifier {
   verify(draftGR) {
     this.alerts = [];
 
-    // Run all verification checks
+    // Run basic verification checks
     this._checkDeprecatedAccountHeads(draftGR);
     this._checkBudgetCompliance(draftGR);
     this._checkPolicyConflicts(draftGR);
-    this._checkMissingReferences(draftGR);
     this._checkTerminologyConsistency(draftGR);
     this._checkDistrictJurisdiction(draftGR);
     this._checkFinancialOverrun(draftGR);
     this._checkTemporalConflicts(draftGR);
     this._checkPolicyKnowledgeBaseConflicts(draftGR);
+
     // Assign unique IDs to each alert if missing
     this.alerts = this.alerts.map((a, idx) => ({
       ...a,

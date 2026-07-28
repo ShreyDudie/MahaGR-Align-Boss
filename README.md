@@ -159,9 +159,10 @@ Follow these testing steps with sample inputs to verify all features:
 2. Look at the alert card in the right pane.
 3. Click the blue link `🔗 View Conflicting GR (GR-Number)`.
 4. **Expected Outcome**:
-   - A modal immediately pops up showing the full official text of the conflicting historical GR (Read Section, Preamble, and Resolution clauses).
-   - This allows instant comparison and cross-verification without losing your current drafting context.
+   - A modal pops up displaying the full official text of the conflicting historical GR.
    - Click `×` to dismiss the modal and return to editing.
+
+---
 
 ---
 

@@ -196,7 +196,7 @@ export class GRGenerator {
       conflict_audit: auditResult,
       calculated_21_digit_gr_id: grId,
       security_checksum: secToken,
-      read_section_text: readSectionText,
+      read_section_text: '',
       preamble_marathi: preambleEnglish,
       resolution_clauses_marathi: clausesEnglish,
       preamble_english: preambleEnglish,

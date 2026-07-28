@@ -46,16 +46,21 @@ export default function ExecutiveDashboard({ user }) {
     }
   };
 
-  const handleReject = async (grId, reason) => {
+  const handleReject = async (grId, reason, actionType = 'request_changes') => {
     try {
       await axios.post(`http://localhost:5000/api/gr/${grId}/reject`, {
         userId: user.id,
         role: user.role,
         reason,
+        actionType
       });
       setGrs(prev => prev.filter(gr => gr.id !== grId));
       setSelectedGR(null);
-      alert('⚠️ GR returned with comments.');
+      if (actionType === 'reject') {
+        alert('❌ GR permanently rejected.');
+      } else {
+        alert('📝 Revision comments sent back to Desk Officer.');
+      }
     } catch (error) {
       alert('Error rejecting GR: ' + error.message);
     }
@@ -116,8 +121,12 @@ export default function ExecutiveDashboard({ user }) {
         {/* Review Panel */}
         {selected && (
           <div className="approval-panel">
-            <div className="review-header">
-              <h3>{selected.metadata?.subject}</h3>
+            <div className="review-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <img src="/emblem_india_maharashtra.png" style={{ height: '42px', objectFit: 'contain' }} alt="State Emblem" />
+                <img src="/maharashtra_rajmudra_seal.png" style={{ height: '42px', objectFit: 'contain' }} alt="Rajmudra Seal" />
+                <h3 style={{ margin: 0 }}>{selected.metadata?.subject}</h3>
+              </div>
               <div className={`compliance-badge ${hasIssues ? 'warning' : 'success'}`}>
                 {hasIssues ? '⚠️ Review Issues' : '✅ Compliant'}
               </div>
@@ -160,6 +169,21 @@ export default function ExecutiveDashboard({ user }) {
               </div>
             )}
 
+            {/* Audit Log / History for Transparency */}
+            {selected.history && selected.history.length > 0 && (
+              <div className="issues-panel" style={{ backgroundColor: '#f8fafc', border: '1px solid #cbd5e1' }}>
+                <h4 style={{ color: '#0f172a' }}>📜 Audit Trail & Action Log ({selected.history.length})</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12.5px', color: '#334155' }}>
+                  {selected.history.map((log, idx) => (
+                    <div key={idx} style={{ background: 'white', padding: '8px 12px', borderRadius: '4px', borderLeft: '3px solid #0284c7' }}>
+                      <strong>{log.action}</strong> by <em>{log.performedBy}</em> <span style={{ color: '#64748b', fontSize: '11px' }}>({new Date(log.timestamp).toLocaleString()})</span>
+                      {log.comments && <div style={{ marginTop: '2px', color: '#475569' }}>"{log.comments}"</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Quick View */}
             <div className="quick-view">
               <h4>Resolution Preview</h4>
@@ -178,21 +202,33 @@ export default function ExecutiveDashboard({ user }) {
             </div>
 
             {/* Action Buttons */}
-            <div className="action-buttons">
+            <div className="action-buttons" style={{ display: 'flex', gap: '10px' }}>
               <button
                 className="btn btn-approve"
                 onClick={() => handleApprove(selected.id)}
+                style={{ flex: 1, backgroundColor: '#059669' }}
               >
-                ✅ Approve
+                ✅ Approve & Sign
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  const reason = prompt('Specify revisions / feedback comments required from Desk Officer:');
+                  if (reason) handleReject(selected.id, reason, 'request_changes');
+                }}
+                style={{ flex: 1, backgroundColor: '#d97706', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', padding: '10px' }}
+              >
+                📝 Request Changes
               </button>
               <button
                 className="btn btn-reject"
                 onClick={() => {
-                  const reason = prompt('Reason for rejection:');
-                  if (reason) handleReject(selected.id, reason);
+                  const reason = prompt('Specify official reason for complete rejection:');
+                  if (reason) handleReject(selected.id, reason, 'reject');
                 }}
+                style={{ flex: 1, backgroundColor: '#dc2626' }}
               >
-                ❌ Request Changes
+                ❌ Reject Document
               </button>
             </div>
           </div>

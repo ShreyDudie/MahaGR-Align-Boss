@@ -212,3 +212,80 @@ Verify that the official letterhead format adheres strictly to the Maharashtra M
      - The **Copy Forwarded Distribution List** at the bottom.
      - Clickable footnotes for the **Top 3 Precursor References**.
 3. Click the green button **Download / Print Official GR PDF** to save or print the page as a structured PDF document.
+
+---
+
+## 🚫 Userflow 7: Independent Alert Dismissal & Submission Gate
+
+### Intent
+Verify that dismissing a single verification alert removes only that specific item, and that submitting a resolution is gated until all alerts are either resolved (Auto-Fix) or dismissed.
+
+### Steps
+1. Navigate to **Create GR** (`/create`) under **Clerk** mode.
+2. Enter an amount over 4 Crores (`₹4,50,00,000`) or choose an outdated account head to trigger multiple verification alerts.
+3. Click **Generate Government Resolution**.
+4. Inside the **Draft Workspace**:
+   - Inspect the top alert banner displaying the generated alerts.
+   - Click **Dismiss** on the first alert card.
+   - **Expected Outcome**: Only the targeted alert disappears; all remaining alerts stay visible.
+   - Inspect the workspace footer: The **Submit for Review** button is disabled with a warning badge: `⚠️ Resolve (Auto-Fix) or Dismiss all alerts before submitting`.
+5. Click **Dismiss** or **Auto-Fix** on the remaining alert cards.
+6. **Expected Outcome**: Once all alerts are cleared, the **Submit for Review** button becomes active and enabled.
+
+---
+
+## 🇬🇧 Userflow 8: 100% Administrative English Document Generation (No References Section)
+
+### Intent
+Ensure the document text is generated strictly in formal government-style English without Marathi text mixing, and confirm the References section has been completely removed from the document preview and PDF output.
+
+### Steps
+1. Create and generate any Government Resolution as a Clerk.
+2. Inside the **Draft Workspace**:
+   - Inspect the section titles and resolution body text in the preview pane.
+   - **Expected Outcome**: Preamble, Executive Order Clauses, Financial Allocations, and Distribution List are 100% in formal Administrative English ("In pursuance of...", "The Government is pleased to accord sanction...").
+   - Confirm there is **no References section** in the document layout.
+3. Click **🖨️ Official Format & PDF Download** in the top action bar.
+4. **Expected Outcome**: The exported HTML/PDF letterhead displays clean, formal administrative English text without a References section.
+
+---
+
+## 🏛️ Userflow 9: Senior Minister Review (Approve, Request Changes & Permanent Reject with Audit Trail)
+
+### Intent
+Verify that the Senior Minister has options to approve, request revisions with feedback comments, or permanently reject a GR, and confirm that all actions leave an audit trail log.
+
+### Steps
+1. In the top navbar role dropdown, select **Minister: Hon. Minister Patil**.
+2. Navigate to **Executive Review** (`/approve/pending`).
+3. Select a pending resolution from the queue.
+4. Observe the top header displaying the official emblems (**State Emblem of India** and **Maharashtra Rajmudra Seal**).
+5. Test the 3 available action buttons:
+   - **📝 Request Changes**: Click and enter revision comments (e.g. "Adjust allocated budget for Wardha district"). Status changes to `rejected` with `rejectedBy = 'minister'`, allowing the Desk Officer to revise and resubmit directly back to the Minister.
+   - **❌ Reject Document**: Click and enter official rejection reason. The resolution is permanently marked as rejected.
+   - **✅ Approve & Sign**: Click to approve and sign off the resolution.
+6. Inspect the **📜 Audit Trail & Action Log** section on the review panel:
+   - **Expected Outcome**: Displays an append-only timeline tracking every action, user role, timestamp, and comments for full transparency.
+
+---
+
+## 🤖 Userflow 10: AI Policy Search Assistant Chatbot (98,000+ GR Knowledge Base)
+
+### Intent
+Verify that the floating AI assistant widget allows users to search the 98,000+ GR database in conversational English, providing bullet point summaries and clickable links to full resolution documents.
+
+### Steps
+1. Locate the floating chatbot widget at the **bottom-right corner** of the screen (`🤖 AI Policy Assistant`).
+2. Click the floating button to expand the chat panel.
+3. Click one of the suggestion chips or type a search query:
+   - *"Was a GR launched for Lumpy Skin Disease?"*
+   - *"Solar pump subsidy scheme rules"*
+4. **Expected Outcome**:
+   - The assistant queries the 98,000+ Maharashtra GR database.
+   - Responds strictly in **clear, conversational English**.
+   - Outlines the key rules and mandates in clean **bullet point format** (`• ...`).
+   - Displays clickable link badges: `🔗 GR [GR_ID] (Department)`.
+5. Click any `🔗 GR [GR_ID]` link button in the chat response.
+6. **Expected Outcome**:
+   - An official document modal immediately pops up overlaying the screen, displaying the complete resolution document (Header with official emblems, Preamble, Government Resolution clauses, Financial details).
+   - Click **🖨️ Open Full PDF View** or `×` to close.

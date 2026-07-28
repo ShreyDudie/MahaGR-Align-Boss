@@ -12,6 +12,7 @@ import GRParser from './services/grParser.js';
 import GRIndexer from './services/grIndexer.js';
 import GRVerifier from './services/grVerifier.js';
 import GRGenerator from './services/grGenerator.js';
+import GRAssistant from './services/grAssistant.js';
 import {
   initDB,
   saveGR,
@@ -54,6 +55,7 @@ app.use(express.json());
 let indexer = null;
 let verifier = null;
 let generator = null;
+let assistant = null;
 
 /**
  * Initialize backend: Parse all GRs and build indices
@@ -121,6 +123,10 @@ async function initializeBackend() {
       generator = new GRGenerator(indexer, { type: 'fallback' });
       console.log('ℹ️  No API key configured - Generator initialized in Local Fallback mode');
     }
+
+    // Initialize Assistant for 98k GR Conversational AI Search
+    assistant = new GRAssistant(indexer);
+    console.log('✅ AI Policy Search Assistant ready (98,000+ GR Knowledge Base)');
 
     // Log statistics
     const stats = indexer.getStatistics();
@@ -621,7 +627,10 @@ app.get('/api/gr/:grId/export/html', async (req, res) => {
 
   <div class="container">
     <div class="header">
-      <div class="emblem">🏛️</div>
+      <div style="display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 12px;">
+        <img src="/emblem_india_maharashtra.png" style="height: 65px; object-fit: contain;" alt="Government of Maharashtra Emblem" />
+        <img src="/maharashtra_rajmudra_seal.png" style="height: 65px; object-fit: contain;" alt="Maharashtra Rajmudra Seal" />
+      </div>
       <h1>Government of Maharashtra</h1>
       <h2>${gr.department || 'Department of Administration'}</h2>
       <h2>Mantralaya, Mumbai - 400032</h2>
@@ -658,15 +667,6 @@ app.get('/api/gr/:grId/export/html', async (req, res) => {
       ${gr.sections.introduction}
     </div>` : ''}
 
-    ${gr.sections.references && gr.sections.references.length > 0 ? `
-    <div class="section-title">References</div>
-    <ul class="references-list">
-      ${gr.sections.references.map(ref => `
-        <li>
-          GR No. <strong>${ref.grNumber}</strong> ${ref.date ? `dated ${ref.date}` : ''}
-        </li>
-      `).join('')}
-    </ul>` : ''}
 
     <div class="section-title">Government Resolution</div>
     <div class="resolution-body">
@@ -828,9 +828,24 @@ app.get('/api/gr/:grId/alerts', async (req, res) => {
 app.post('/api/gr/:grId/approve', async (req, res) => {
   try {
     const targetStatus = req.body.status || 'approved';
-    await updateGRStatus(req.params.grId, targetStatus, req.body.userId || 'system');
+    const userId = req.body.userId || 'system';
+    const role = req.body.role || (userId.includes('minister') ? 'minister' : 'senior_officer');
+    
+    await updateGRStatus(req.params.grId, targetStatus, userId);
 
     const gr = await getGR(req.params.grId);
+    if (gr) {
+      gr.history = gr.history || [];
+      gr.history.push({
+        action: targetStatus === 'approved' ? 'Approved & Signed' : 'Approved & Forwarded to Minister',
+        performedBy: role === 'minister' ? 'Hon. Minister Patil' : 'Officer Deshmukh (Joint Secy)',
+        role: role,
+        timestamp: new Date().toISOString(),
+        comments: req.body.comments || 'Approved with formal digital sanction.'
+      });
+      await saveGR(gr, userId);
+    }
+
     res.json({
       success: true,
       gr,
@@ -841,15 +856,16 @@ app.post('/api/gr/:grId/approve', async (req, res) => {
   }
 });
 
-// Reject GR
+// Reject GR / Request Changes
 app.post('/api/gr/:grId/reject', async (req, res) => {
   try {
     const grId = req.params.grId;
     const userId = req.body.userId || 'system';
-    const reason = req.body.reason;
+    const reason = req.body.reason || 'Revision required.';
     const role = req.body.role || '';
+    const actionType = req.body.actionType || 'request_changes'; // 'request_changes' or 'reject'
 
-    let rejectedBy = 'senior_clerk';
+    let rejectedBy = 'senior_officer';
     if (role.toLowerCase() === 'minister' || userId.toLowerCase().includes('minister')) {
       rejectedBy = 'minister';
     }
@@ -859,6 +875,14 @@ app.post('/api/gr/:grId/reject', async (req, res) => {
       gr.status = 'rejected';
       gr.rejectedBy = rejectedBy;
       gr.rejectedReason = reason;
+      gr.history = gr.history || [];
+      gr.history.push({
+        action: actionType === 'reject' ? 'Permanently Rejected Document' : 'Requested Revision / Changes',
+        performedBy: rejectedBy === 'minister' ? 'Hon. Minister Patil' : 'Officer Deshmukh',
+        role: rejectedBy,
+        timestamp: new Date().toISOString(),
+        comments: reason
+      });
       await saveGR(gr, userId);
     }
 
@@ -867,9 +891,39 @@ app.post('/api/gr/:grId/reject', async (req, res) => {
     res.json({
       success: true,
       status: 'rejected',
+      actionType,
+      gr
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// AI Policy Search Assistant Chatbot Endpoint (98,000+ GR Knowledge Base)
+app.post('/api/assistant/chat', async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query || !query.trim()) {
+      return res.status(400).json({ error: 'Query parameter is required.' });
+    }
+
+    if (!assistant) {
+      if (indexer) {
+        assistant = new GRAssistant(indexer);
+      } else {
+        return res.status(503).json({ error: 'GR Assistant Knowledge Base is initializing...' });
+      }
+    }
+
+    const result = await assistant.chat(query.trim());
+    res.json({
+      success: true,
+      answer: result.answer,
+      matchingGRs: result.matchingGRs
+    });
+  } catch (error) {
+    console.error('Error in AI Assistant chat endpoint:', error);
+    res.status(500).json({ error: 'Failed to process AI assistant search: ' + error.message });
   }
 });
 

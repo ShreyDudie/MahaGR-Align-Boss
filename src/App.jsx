@@ -5,6 +5,7 @@ import GRWizard from './components/GRWizard'
 import DraftWorkspace from './components/DraftWorkspace'
 import ExecutiveDashboard from './components/ExecutiveDashboard'
 import AnalyticsDashboard from './components/AnalyticsDashboard'
+import ChatAssistant from './components/ChatAssistant'
 import './App.css'
 
 function AppContent() {
@@ -80,12 +81,16 @@ function AppContent() {
       {/* Header - Government of Maharashtra Portal Style */}
       <header className="header" style={{ background: theme.headerBg, borderBottom: `3px solid ${theme.borderBottomColor}` }}>
         <div className="header-container">
-          <div className="logo-section">
+          <div className="logo-section" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <img 
-              className="rajmudra-emblem" 
-              src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Emblem_of_Maharashtra.svg" 
-              alt="Rajmudra Emblem" 
-              onError={(e) => { e.target.style.display = 'none'; }}
+              src="/emblem_india_maharashtra.png" 
+              alt="State Emblem of India - Government of Maharashtra" 
+              style={{ height: '56px', width: 'auto', objectFit: 'contain', background: '#ffffff', padding: '4px 8px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+            />
+            <img 
+              src="/maharashtra_rajmudra_seal.png" 
+              alt="Maharashtra Rajmudra Seal" 
+              style={{ height: '56px', width: 'auto', objectFit: 'contain', borderRadius: '50%', background: '#ffffff', padding: '2px', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
             />
             <div className="header-text">
               <div className="marathi-title">महाराष्ट्र शासन (Government of Maharashtra)</div>
@@ -169,6 +174,8 @@ function AppContent() {
           </div>
         </div>
       </footer>
+      {/* AI Policy Search Assistant Chatbot Widget */}
+      <ChatAssistant />
     </div>
   );
 }
