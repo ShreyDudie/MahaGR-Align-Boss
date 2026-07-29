@@ -1,18 +1,13 @@
 /**
  * GR Generator Service
  * Ultimate Digital Desk Officer & Policy Auditor for Govt of Maharashtra
- *
- * CHANGES FOR METADATA-AWARE RAG:
- * - Validates budget head, DDO and scheme against PolicyKnowledgeBase before using them
- * - Constructs LLM prompts that forbid inventing financial/account metadata
- * - Leaves budget/DDO/account fields blank or "Unknown" when validation fails
  */
 
 import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'crypto';
 import PolicyKnowledgeBase from './policyKnowledgeBase.js';
 
-export class grGenerator {
+export class GRGenerator {
   constructor(indexer, config) {
     this.indexer = indexer;
     this.knowledgeBase = new PolicyKnowledgeBase(indexer);
@@ -26,11 +21,15 @@ export class grGenerator {
       this.client = new Anthropic({ apiKey: this.config.key });
       this.model = 'claude-3-5-sonnet-20241022';
     }
+
+    // Log initialization
+    console.log(`🔧 GRGenerator initialized with type: ${this.config.type}`);
+    if (this.config.type === 'gemini') {
+      console.log(`   Gemini Model: ${this.config.model || 'gemini-1.5-flash'}`);
+      console.log(`   API Key: ${this.config.key ? '✅ Present' : '❌ Missing'}`);
+    }
   }
 
-  /**
-   * Generate 21-digit GR ID following Govt of Maharashtra Standard: YYYYMMDDHHMMSSXXXXXX
-   */
   _generate21DigitGRId(dateStr) {
     const now = new Date();
     const datePart = (dateStr || now.toISOString().split('T')[0]).replace(/-/g, '');
@@ -40,18 +39,11 @@ export class grGenerator {
     return rawId.padEnd(21, '0').slice(0, 21);
   }
 
-  /**
-   * Generate digital security checksum for 21-digit GR ID
-   */
   _generateSecurityToken(grId) {
     const hash = crypto.createHash('sha256').update(grId + '_MAHA_SECURE_KEY').digest('hex').substring(0, 8).toUpperCase();
     return `SEC-MH-${hash}-${grId.slice(-4)}`;
   }
 
-  /**
-   * TASK A: Policy & Cross-Department Conflict Auditing Engine
-   * Runs BEFORE text generation to detect rule violations and ceiling limit breaches
-   */
   _auditConflicts(inputData) {
     if (!this.knowledgeBase) {
       this.knowledgeBase = new PolicyKnowledgeBase(this.indexer);
@@ -59,9 +51,6 @@ export class grGenerator {
     return this.knowledgeBase.auditPolicyConflicts(inputData);
   }
 
-  /**
-   * TASK B & C: Generate Fallback Structured GR Object when no API key is available
-   */
   _generateFallbackGR(inputData, auditResult, grId, secToken) {
     const dept = inputData.department_name || inputData.department || 'School Education and Sports Department';
     const trigger = inputData.trigger_event || inputData.subject || 'Developmental requirements and administrative necessity';
@@ -70,7 +59,6 @@ export class grGenerator {
     const signee = inputData.signee_designation || 'Under Secretary to Government of Maharashtra';
     const grType = inputData.gr_type || inputData.intentType || '1_FINANCIAL_SANCTION';
 
-    // Format References Block
     const readRefs = inputData.read_references || [
       `${refDoc}`,
       `Government Resolution, Finance Department No. FIN-2024/CR-12, Dated 15th January 2024.`,
@@ -78,20 +66,15 @@ export class grGenerator {
     ];
 
     const readSectionText = `Read:\n` + readRefs.map((r, idx) => `${idx + 1}. ${r}`).join('\n');
-
-    // Build English Preamble
     const preambleEnglish = `In view of ${trigger}, and pursuant to the directions issued under ${refDoc}, the Government of Maharashtra in the ${dept} has carefully considered the proposal for ${action}. Following comprehensive administrative and financial evaluation, the Government is pleased to issue the following Resolution.`;
     const preambleMarathi = preambleEnglish;
 
-    // Build Resolution Clauses dynamically (Omit null fields, append flex-fields)
     const clausesMarathi = [];
     const clausesEnglish = [];
 
-    // Core Executive Order (Clause 1)
     clausesEnglish.push(`1. The Government hereby accords formal administrative and executive sanction for ${action}.`);
     clausesMarathi.push(`1. The Government hereby accords formal administrative and executive sanction for ${action}.`);
 
-    // Type-Specific Clauses (Omit null variables cleanly)
     let cIdx = 2;
     if (grType.includes('FINANCIAL') || inputData.precise_amount_inr || inputData.budget) {
       const amt = inputData.precise_amount_inr || inputData.budget || '0';
@@ -164,7 +147,6 @@ export class grGenerator {
       }
     }
 
-    // Process Dynamic Flex-Fields (`additional_custom_parameters`)
     const flexFields = inputData.additional_custom_parameters || [];
     flexFields.forEach(ff => {
       if (ff.parameter_name && ff.parameter_value) {
@@ -174,11 +156,9 @@ export class grGenerator {
       }
     });
 
-    // Standard Compliance Obligation
     clausesMarathi.push(`${cIdx}. सदर शासन निर्णय महाराष्ट्र शासनाच्या www.maharashtra.gov.in या संकेतस्थळावर उपलब्ध असून त्याचा संगणक संकेतांक (21-Digit GR ID): ${grId} असा आहे.`);
     clausesEnglish.push(`${cIdx}. This Government Resolution is available on the official Portal of Government of Maharashtra (www.maharashtra.gov.in) under Unique 21-Digit Computer Code: ${grId}.`);
 
-    // Build Footer Distribution
     const distList = inputData.footer_distribution_list || [
       'The Accountant General (A&E), Maharashtra, Mumbai / Nagpur.',
       'The Pay and Accounts Officer, Mumbai.',
@@ -189,7 +169,6 @@ export class grGenerator {
 
     const distText = `Copy forwarded for information and action:\n` + distList.map((d, i) => `${i + 1}) ${d}`).join('\n');
 
-    // Generate Suggested Database Search Queries
     const queries = [
       `${trigger.split(' ').slice(0, 4).join(' ')} fund release`,
       `${dept} policy sanction ${new Date().getFullYear()}`,
@@ -199,11 +178,9 @@ export class grGenerator {
 
     return {
       conflict_audit: auditResult,
-      calculated_21_digit_gr_id: grId,
-      security_checksum: secToken,
-      read_section_text: '',
-      preamble_marathi: preambleEnglish,
-      resolution_clauses_marathi: clausesEnglish,
+      read_section_text: readSectionText || '',
+      preamble_marathi: preambleMarathi || preambleEnglish,
+      resolution_clauses_marathi: clausesMarathi,
       preamble_english: preambleEnglish,
       resolution_clauses_english: clausesEnglish,
       footer_distribution_text: distText,
@@ -213,18 +190,25 @@ export class grGenerator {
     };
   }
 
-  /**
-   * Main Method: Generate new Government Resolution draft
-   */
-  async generateGR(inputData) {
+async generateGR(inputData) {
     const today = inputData.gr_date || new Date().toISOString().split('T')[0];
     const grId = inputData.calculated_21_digit_gr_id || this._generate21DigitGRId(today);
     const secToken = this._generateSecurityToken(grId);
 
-    // Step A: Run Policy & Conflict Audit FIRST
-    const auditResult = this._auditConflicts(inputData);
+    // ============================================
+    // STEP 1: Run audit on ORIGINAL input and SAVE IT
+    // ============================================
+    const originalAuditResult = this._auditConflicts(inputData);
+    console.log('\n🔍 === ORIGINAL AUDIT RESULT ===');
+    console.log('Has Conflict:', originalAuditResult.has_conflict);
+    console.log('Severity:', originalAuditResult.severity);
+    console.log('Conflicts Count:', originalAuditResult.conflicted_grs?.length || 0);
+    console.log('Conflict Details:', originalAuditResult.conflict_details);
+    console.log('================================\n');
 
-    // Step A.5: Validate metadata fields against Knowledge Base and ensure department consistency
+    // ============================================
+    // STEP 2: Validate metadata
+    // ============================================
     const dept = inputData.department_name || inputData.department || '';
     const validated = {
       budget_head: null,
@@ -238,10 +222,6 @@ export class grGenerator {
       if (this.knowledgeBase.validateBudgetHeadForDepartment(inputData.budget_head_15_digit, dept)) {
         validated.budget_head = inputData.budget_head_15_digit;
         validated.account_head_valid = true;
-      } else {
-        // Do not copy invalid budget heads from retrieved GRs; leave null
-        validated.budget_head = null;
-        validated.account_head_valid = false;
       }
     }
 
@@ -249,23 +229,19 @@ export class grGenerator {
       if (this.knowledgeBase.validateDDOForDepartment(inputData.drawing_disbursing_officer, dept)) {
         validated.ddo = inputData.drawing_disbursing_officer;
         validated.ddo_valid = true;
-      } else {
-        validated.ddo = null;
-        validated.ddo_valid = false;
       }
     }
 
     if (inputData.scheme_name) {
-      // check which department typically owns this scheme
       const owners = this.knowledgeBase.getSchemeOwners(inputData.scheme_name.toLowerCase());
       if (owners.length > 0 && (!owners[0].department || owners[0].department === dept)) {
         validated.scheme = inputData.scheme_name;
-      } else {
-        validated.scheme = null;
       }
     }
 
-    // Find similar GRs from indexer for style context
+    // ============================================
+    // STEP 3: Find similar GRs for style context
+    // ============================================
     const draftQueryObj = {
       id: grId,
       department: inputData.department_name || inputData.department || '',
@@ -281,40 +257,64 @@ export class grGenerator {
     }
     const styleContext = this._buildStyleContext(similar);
 
+    // ============================================
+    // STEP 4: Generate the GR content
+    // ============================================
     let structuredOutput;
 
     if (this.config.type === 'fallback' || !this.config.key) {
-      structuredOutput = this._generateFallbackGR(inputData, auditResult, grId, secToken);
+      structuredOutput = this._generateFallbackGR(inputData, originalAuditResult, grId, secToken);
     } else {
       try {
-        // Build prompt with validated metadata only. Fields not validated are set to 'Unknown' or left empty.
         const safeInput = { ...inputData };
         safeInput.budget_head_15_digit = validated.account_head_valid ? validated.budget_head : '';
         safeInput.drawing_disbursing_officer = validated.ddo_valid ? validated.ddo : '';
         safeInput.scheme_name = validated.scheme || '';
 
-        const prompt = this._buildJsonPrompt(safeInput, styleContext, auditResult, grId);
+        const prompt = this._buildJsonPrompt(safeInput, styleContext, originalAuditResult, grId);
 
         let responseText = '';
+
         if (this.config.type === 'gemini') {
           const modelName = this.config.model || 'gemini-1.5-flash';
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.config.key}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: { maxOutputTokens: 2500, temperature: 0.2 }
-            })
-          });
+          console.log(`📡 Calling Gemini API with model: ${modelName}`);
+          
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.config.key}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                  maxOutputTokens: 4096,
+                  temperature: 0.1,
+                  responseMimeType: "application/json"
+                }
+              })
+            }
+          );
 
           if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.error?.message || `Gemini API error ${response.status}`);
+            const errorText = await response.text();
+            console.error('❌ Gemini API Error:', response.status, errorText);
+            throw new Error(`Gemini API error ${response.status}: ${errorText}`);
           }
+
           const data = await response.json();
-          responseText = data.candidates[0].content.parts[0].text;
+          console.log('✅ Gemini API response received');
+          responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          
+          if (!responseText) {
+            throw new Error('Empty response from Gemini API');
+          }
+          
+          console.log(`📝 Response length: ${responseText.length} characters`);
+          
         } else if (this.config.type === 'openrouter') {
           const modelName = this.config.model || 'meta-llama/llama-3-8b-instruct:free';
+          console.log(`📡 Calling OpenRouter API with model: ${modelName}`);
+          
           const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -326,49 +326,80 @@ export class grGenerator {
             body: JSON.stringify({
               model: modelName,
               messages: [{ role: 'user', content: prompt }],
-              max_tokens: 2500,
-              temperature: 0.2
+              max_tokens: 4096,
+              temperature: 0.1,
+              response_format: { type: "json_object" }
             })
           });
 
           if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.error?.message || `OpenRouter API error ${response.status}`);
+            const errorText = await response.text();
+            console.error('❌ OpenRouter API Error:', response.status, errorText);
+            throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
           }
+
           const data = await response.json();
-          responseText = data.choices[0].message.content;
-        } else {
-          // Claude API
+          console.log('✅ OpenRouter API response received');
+          responseText = data.choices?.[0]?.message?.content || '';
+          
+          if (!responseText) {
+            throw new Error('Empty response from OpenRouter API');
+          }
+
+        } else if (this.config.type === 'claude') {
+          console.log(`📡 Calling Claude API with model: ${this.model}`);
+          
           const message = await this.client.messages.create({
             model: this.model,
-            max_tokens: 2500,
+            max_tokens: 4096,
             messages: [{ role: 'user', content: prompt }]
           });
-          responseText = message.content[0].text;
+          
+          console.log('✅ Claude API response received');
+          responseText = message.content[0].text || '';
+          
+          if (!responseText) {
+            throw new Error('Empty response from Claude API');
+          }
+        } else {
+          throw new Error(`Unsupported API type: ${this.config.type}`);
         }
 
-        // Clean JSON from LLM output
-        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          structuredOutput = JSON.parse(jsonMatch[0]);
-        } else {
-          structuredOutput = JSON.parse(responseText);
+        // Parse JSON response
+        try {
+          structuredOutput = await this._parseJSONResponse(responseText);
+          // CRITICAL: Keep the original audit result
+          structuredOutput.conflict_audit = originalAuditResult;
+        } catch (parseError) {
+          console.warn('⚠️ JSON parse failed, using fallback with audit data');
+          structuredOutput = this._generateFallbackGR(inputData, originalAuditResult, grId, secToken);
         }
-      } catch (apiError) {
-        console.warn('⚠️ API Call failed or JSON parse error. Falling back to local structured generator:', apiError.message);
-        structuredOutput = this._generateFallbackGR(inputData, auditResult, grId, secToken);
+
+      } catch (error) {
+        console.error('❌ Generation error:', error.message);
+        console.warn('⚠️ Falling back to local generator');
+        structuredOutput = this._generateFallbackGR(inputData, originalAuditResult, grId, secToken);
       }
     }
 
-    // Step C: Execute Suggested Database Search Queries against 98k Indexer to get Top 3 historical GR reference links
-    let topHistoricalGRs;
+    // ============================================
+    // STEP 5: ALWAYS use the original audit result
+    // ============================================
+    structuredOutput.conflict_audit = originalAuditResult;
+
+    // ============================================
+    // STEP 6: Search for historical references
+    // ============================================
+    let topHistoricalGRs = [];
     const preloadedReferences = {};
 
     const customRefGrIds = [];
     const scanFields = [inputData.reference_document, inputData.original_gr_id].filter(Boolean);
     scanFields.forEach(text => {
-      const matches = [...text.matchAll(/\b(20[0-2]\d{11,18})\b/g)].map(m => m[1]);
-      customRefGrIds.push(...matches);
+      if (text) {
+        const matches = [...text.matchAll(/\b(20[0-2]\d{11,18})\b/g)].map(m => m[1]);
+        customRefGrIds.push(...matches);
+      }
     });
 
     const customRefObjs = [];
@@ -395,22 +426,8 @@ export class grGenerator {
       const allResults = [];
       const queries = structuredOutput.suggested_database_search_queries || [];
       queries.forEach(q => {
-        const hits = this.indexer.search({ query: q, limit: 3 });
+        const hits = this.indexer.search({ keyword: q, limit: 3 });
         allResults.push(...hits);
-      });
-
-      const conflictStr = structuredOutput.conflict_audit?.conflict_details || auditResult?.conflict_details || '';
-      conflictStr.split(/\s*\|\s*/).forEach(item => {
-        const matches = [...item.matchAll(/\(Ref:\s*([^)]+)\)/g)].map(m => m[1]);
-        if (matches.length > 0) {
-          const id = matches.length >= 2 ? matches[1] : matches[0];
-          if (id && !preloadedReferences[id]) {
-            const refDoc = this.indexer.getGRById(id);
-            if (refDoc) {
-              preloadedReferences[id] = refDoc;
-            }
-          }
-        }
       });
 
       const searchGRs = allResults.filter(item => {
@@ -438,7 +455,9 @@ export class grGenerator {
       topHistoricalGRs = [...customRefObjs];
     }
 
-    // Assemble final draft object matching workspace requirements
+    // ============================================
+    // STEP 7: Assemble final draft
+    // ============================================
     const finalDraft = {
       id: grId,
       calculated_21_digit_gr_id: grId,
@@ -452,8 +471,15 @@ export class grGenerator {
         generatedAt: new Date().toISOString(),
         grDate: today,
         signeeDesignation: inputData.signee_designation || 'Under Secretary',
+        // Store the original audit result in metadata for debugging
+        _auditResult: {
+          has_conflict: originalAuditResult.has_conflict,
+          severity: originalAuditResult.severity,
+          conflict_count: originalAuditResult.conflicted_grs?.length || 0
+        }
       },
-      conflict_audit: structuredOutput.conflict_audit || auditResult,
+      // CRITICAL: Use the ORIGINAL audit result
+      conflict_audit: originalAuditResult,
       preloadedReferences: preloadedReferences,
       sections: {
         header: `GOVERNMENT OF MAHARASHTRA\n${inputData.department_name || inputData.department || 'DEPARTMENT'}\n21-Digit GR ID: ${grId}`,
@@ -465,7 +491,6 @@ export class grGenerator {
         resolution_clauses_english: structuredOutput.resolution_clauses_english || [],
         resolution: (structuredOutput.resolution_clauses_marathi || []).join('\n'),
         resolutions: (structuredOutput.resolution_clauses_marathi || []).map((text, idx) => ({ text, index: idx + 1 })),
-        // Only include validated financial metadata. Unvalidated fields are left blank to avoid copying from unrelated departments.
         financials: inputData.precise_amount_inr ? [{
           type: 'allocation',
           amount: inputData.precise_amount_inr,
@@ -480,13 +505,24 @@ export class grGenerator {
       inputPayload: inputData
     };
 
+    // ============================================
+    // STEP 8: Debug log the final conflict_audit
+    // ============================================
+    console.log('\n📤 === FINAL DRAFT CONFLICT AUDIT ===');
+    console.log('Has Conflict:', finalDraft.conflict_audit?.has_conflict);
+    console.log('Severity:', finalDraft.conflict_audit?.severity);
+    console.log('Conflicts Count:', finalDraft.conflict_audit?.conflicted_grs?.length || 0);
+    console.log('=====================================\n');
+
     return {
       success: true,
       grId: grId,
       draft: finalDraft,
       rawOutput: JSON.stringify(structuredOutput, null, 2)
     };
-  }
+}
+   
+
 
   _buildStyleContext(similarGRs) {
     if (!similarGRs || similarGRs.length === 0) return '';
@@ -497,61 +533,123 @@ export class grGenerator {
     return context;
   }
 
+  async _parseJSONResponse(responseText) {
+    if (!responseText || typeof responseText !== 'string') {
+      throw new Error('Invalid response text');
+    }
+
+    // 1. Sanitize unicode space characters (like non-breaking spaces \u00A0)
+    let sanitized = responseText
+      .replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000]/g, ' ')
+      .replace(/```json\s*/gi, '')
+      .replace(/```\s*/gi, '')
+      .trim();
+
+    // 2. Extract JSON payload bounded by outermost braces
+    const firstBrace = sanitized.indexOf('{');
+    const lastBrace = sanitized.lastIndexOf('}');
+    
+    if (firstBrace === -1 || lastBrace === -1) {
+      throw new Error('No valid JSON object bounds found');
+    }
+
+    let jsonString = sanitized.substring(firstBrace, lastBrace + 1);
+
+    // 3. Sanitizer strategies to handle standard LLM formatting errors
+    const repairStrategies = [
+      // Direct parse
+      (str) => JSON.parse(str),
+
+      // Fix trailing commas in objects and arrays
+      (str) => JSON.parse(str.replace(/,\s*([}\]])/g, '$1')),
+
+      // Fix unescaped raw newlines inside JSON string properties
+      (str) => {
+        const cleaned = str.replace(/(?<=:\s*"[^"]*)\n(?=[^"]*")/g, '\\n');
+        return JSON.parse(cleaned);
+      },
+
+      // Aggressive repair for control characters and unescaped quotes
+      (str) => {
+        const cleaned = str
+          .replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
+            if (match === '\n') return '\\n';
+            if (match === '\r') return '\\r';
+            if (match === '\t') return '\\t';
+            return '';
+          })
+          .replace(/,\s*([}\]])/g, '$1');
+        return JSON.parse(cleaned);
+      }
+    ];
+
+    let lastError = null;
+    for (const strategy of repairStrategies) {
+      try {
+        const result = strategy(jsonString);
+        if (result && typeof result === 'object') {
+          console.log('✅ JSON parsed successfully');
+          return result;
+        }
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    console.error('❌ All JSON parsing attempts failed');
+    console.error('Problematic Raw Output (first 300 chars):', jsonString.substring(0, 300) + '...');
+    throw new Error(`Failed to parse JSON: ${lastError?.message || 'Unknown parsing error'}`);
+  }
+
   _buildJsonPrompt(inputData, styleContext, auditResult, _grId) {
-    return `You are the Premier Digital Desk Officer (कक्षा अधिकारी) and Policy Auditor for the Government of Maharashtra.
-Generate an authoritative Government Resolution (GR) in JSON format matching the exact schema below.
+    const safeString = (str) => {
+      if (!str) return '';
+      return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, ' ')
+        .replace(/\r/g, ' ')
+        .trim();
+    };
 
-INPUT VARIABLES:
-- Department: ${inputData.department_name || inputData.department}
-- GR Type: ${inputData.gr_type || inputData.intentType}
-- Date: ${inputData.gr_date || new Date().toISOString().split('T')[0]}
-- Signee Designation: ${inputData.signee_designation || 'Under Secretary'}
-- Reference Document: ${inputData.reference_document || 'N/A'}
-- Trigger Event: ${inputData.trigger_event || 'N/A'}
-- Targeted Action: ${inputData.targeted_action || inputData.subject || 'N/A'}
-- Type-Specific Variables: ${JSON.stringify(inputData.type_specific_variables || inputData.deptDetails || {})}
-- Dynamic Flex-Fields: ${JSON.stringify(inputData.additional_custom_parameters || [])}
+    const dept = safeString(inputData.department_name || inputData.department || 'N/A');
+    const grType = safeString(inputData.gr_type || inputData.intentType || 'N/A');
+    const grDate = safeString(inputData.gr_date || new Date().toISOString().split('T')[0]);
+    const signee = safeString(inputData.signee_designation || 'Under Secretary');
+    const refDoc = safeString(inputData.reference_document || 'N/A');
+    const trigger = safeString(inputData.trigger_event || 'N/A');
+    const action = safeString(inputData.targeted_action || inputData.subject || 'N/A');
+    const typeVars = JSON.stringify(inputData.type_specific_variables || inputData.deptDetails || {});
+    const flexFields = JSON.stringify(inputData.additional_custom_parameters || []);
 
-${styleContext}
+    return `You are the Premier Digital Desk Officer for the Government of Maharashtra.
+Return ONLY valid raw JSON matching the exact schema below. Do not output markdown code blocks or explanatory text.
 
-STRICT CONSTRAINTS:
-1. Preamble & Resolutions must be written in formal, authoritative Administrative English ONLY. Do do not output any Marathi translations or Devanagari text. All fields (including those labeled marathi) must be populated with English text only.
-2. CONTINUOUS NUMBERING: If an input field is empty/null, OMIT that clause completely without leaving blank gap lines or breaking the continuous 1, 2, 3... numbering sequence.
-3. FLEX-FIELDS: Convert items in 'additional_custom_parameters' array into standalone numbered resolution clauses.
-4. JSON OUTPUT ONLY. Respond strictly with a valid JSON object matching this schema:
+INPUT DETAILS:
+- Department: ${dept}
+- GR Type: ${grType}
+- Date: ${grDate}
+- Signee: ${signee}
+- Reference: ${refDoc}
+- Trigger: ${trigger}
+- Action: ${action}
+- Type-Specific: ${typeVars}
+- Flex-Fields: ${flexFields}
 
+${styleContext || ''}
+
+JSON SCHEMA:
 {
-  "conflict_audit": {
-    "has_conflict": ${auditResult.has_conflict},
-    "severity": "${auditResult.severity}",
-    "conflict_details": "${auditResult.conflict_details.replace(/"/g, "'")}"
-  },
-  "read_section_text": "Read:\\n1) ...\\n2) ...",
-  "preamble_marathi": "Formal English text of Preamble...",
-  "resolution_clauses_marathi": [
-    "1. ...",
-    "2. ..."
-  ],
-  "preamble_english": "Formal administrative English text of Preamble...",
-  "resolution_clauses_english": [
-    "1. ...",
-    "2. ..."
-  ],
-  "footer_distribution_text": "Copy forwarded for information and action:\\n1) ...\\n2) ...",
+  "read_section_text": "Read:\\n1. Reference 1\\n2. Reference 2",
+  "preamble_marathi": "मजकूर...",
+  "resolution_clauses_marathi": ["1. नियम १", "2. नियम २"],
+  "preamble_english": "English text...",
+  "resolution_clauses_english": ["1. Clause 1", "2. Clause 2"],
+  "footer_distribution_text": "Copy forwarded to:\\n1. Authority 1",
   "footer_distribution_list": ["Authority 1", "Authority 2"],
-  "suggested_database_search_queries": [
-    "Query 1",
-    "Query 2",
-    "Query 3"
-  ],
-  "metadata_handling_rules": [
-    "The LLM MUST NOT invent or hallucinate any Budget Heads, DDO names, Financial Codes, Government Codes, or Account Heads.",
-    "Use only the validated metadata values provided in the INPUT VARIABLES above. If a field is empty or not validated, set it to an empty string or the literal value 'Unknown'.",
-    "Do NOT copy metadata values from retrieved historical GR examples unless they are explicitly validated and present in the INPUT VARIABLES.",
-    "The LLM is only responsible for legal language, preamble, resolution clauses, formatting, and administrative wording. All numeric codes and officer/designation fields must come from validated inputs only."
-  ]
+  "suggested_database_search_queries": ["Query 1", "Query 2"]
 }`;
   }
 }
 
-export default grGenerator;
+export default GRGenerator;

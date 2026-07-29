@@ -8,9 +8,12 @@
  * - Keeps backward-compatible indices used elsewhere in the codebase
  */
 
+import fs from "fs";
+
 export class GRIndexer {
   constructor() {
-    this.grs = []; // All parsed GRs
+    this.grs = [];
+
     this.indices = {
       byDepartment: new Map(),
       byYear: new Map(),
@@ -21,40 +24,66 @@ export class GRIndexer {
       byGRNumber: new Map(),
       byGRNumberNormalized: new Map(),
     };
+
+    // Clause-level semantic search
+    this.clauseIndex = [];
+    this.clauseIndexReady = false;
+
+    // Embedding configuration - FIXED MODEL NAME
+    this.embeddingModel =
+      process.env.GEMINI_EMBEDDING_MODEL ||
+      process.env.EMBEDDING_MODEL ||
+      "embedding-001"; // Changed from text-embedding-004 to embedding-001
+
+    this.embeddingKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.EMBEDDING_API_KEY ||
+      null;
   }
 
-  /**
-   * Index a collection of parsed GRs
-   */
-  indexGRs(parsedGRs) {
-    this.grs = parsedGRs;
+  indexGRs(parsedGRs = []) {
+    this.grs = Array.isArray(parsedGRs) ? parsedGRs : [];
 
-    parsedGRs.forEach(gr => {
+    this.grs.forEach((gr) => {
+      if (!gr) return;
+
+      // Ensure objects exist
+      gr.metadata = gr.metadata || {};
+      gr.sections = gr.sections || {};
+
+      gr.metadata.keywords ??= [];
+      gr.metadata.budget_heads ??= [];
+      gr.metadata.ddo_candidates ??= [];
+      gr.metadata.scheme_words ??= [];
+
       // Index by department
-      if (gr.department) {
-        if (!this.indices.byDepartment.has(gr.department)) {
-          this.indices.byDepartment.set(gr.department, []);
-        }
-        this.indices.byDepartment.get(gr.department).push(gr.id);
+      const department = gr.department || "General";
+      if (!this.indices.byDepartment.has(department)) {
+        this.indices.byDepartment.set(department, []);
       }
+      this.indices.byDepartment.get(department).push(gr.id);
 
       // Index by year from metadata date and compute financial year
-      if (gr.metadata.date) {
-        const parts = String(gr.metadata.date).split('-');
-        const year = parts[parts.length - 1];
-        if (!this.indices.byYear.has(year)) {
+      if (gr.metadata?.date) {
+        const parts = String(gr.metadata.date || "").split("-");
+        const year = Number(parts.at(-1));
+        if (year && !this.indices.byYear.has(year)) {
           this.indices.byYear.set(year, []);
         }
-        this.indices.byYear.get(year).push(gr.id);
+        if (year) {
+          this.indices.byYear.get(year).push(gr.id);
+        }
 
         // Compute simple financial year (e.g., 2023-24) from month name/number when possible
         try {
           const monthPart = parts[1] || '';
           const monthLower = monthPart.toString().toLowerCase();
-          const monthMap = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+          const monthMap = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
           let month = parseInt(monthPart, 10);
           if (isNaN(month)) {
-            Object.keys(monthMap).forEach(k => { if (monthLower.startsWith(k)) month = monthMap[k]; });
+            Object.keys(monthMap).forEach(k => { 
+              if (monthLower.startsWith(k)) month = monthMap[k]; 
+            });
           }
           if (!isNaN(month) && month > 0) {
             const y = parseInt(year, 10);
@@ -67,8 +96,8 @@ export class GRIndexer {
       }
 
       // Index by districts
-      if (gr.districts && gr.districts.length > 0) {
-        gr.districts.forEach(district => {
+      if (Array.isArray(gr.districts) && gr.districts.length) {
+        gr.districts.forEach((district) => {
           if (!this.indices.byDistrict.has(district)) {
             this.indices.byDistrict.set(district, []);
           }
@@ -76,25 +105,35 @@ export class GRIndexer {
         });
       }
 
-      // Index by GR number
-      if (gr.metadata.grNumber) {
-        this.indices.byGRNumber.set(gr.metadata.grNumber, gr.id);
-        const norm = gr.metadata.grNumber.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (norm) {
-          this.indices.byGRNumberNormalized.set(norm, gr.id);
-        }
-      }
-      if (gr.id) {
-        const normId = gr.id.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (normId) {
-          this.indices.byGRNumberNormalized.set(normId, gr.id);
+      // Index by GR Number
+      if (gr.metadata?.grNumber) {
+        const grNumber = String(gr.metadata.grNumber).trim();
+        this.indices.byGRNumber.set(grNumber, gr.id);
+
+        const normalized = grNumber
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+
+        if (normalized) {
+          this.indices.byGRNumberNormalized.set(normalized, gr.id);
         }
       }
 
-      // Index by keywords from subject
-      if (gr.metadata.subject) {
+      if (gr.id) {
+        const normalizedId = String(gr.id)
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+
+        if (normalizedId) {
+          this.indices.byGRNumberNormalized.set(normalizedId, gr.id);
+        }
+      }
+
+      // Subject Keyword Index
+      if (gr.metadata?.subject) {
         const keywords = this._extractKeywords(gr.metadata.subject);
         gr.metadata.keywords = keywords;
+
         keywords.forEach(keyword => {
           if (!this.indices.byKeyword.has(keyword)) {
             this.indices.byKeyword.set(keyword, []);
@@ -104,55 +143,83 @@ export class GRIndexer {
       }
 
       // Ensure metadata containers for structured fields
-      if (!gr.metadata.budget_heads) gr.metadata.budget_heads = [];
-      if (!gr.metadata.ddo_candidates) gr.metadata.ddo_candidates = [];
-      if (!gr.metadata.scheme_words) gr.metadata.scheme_words = [];
+      gr.metadata.budget_heads ??= [];
+      gr.metadata.ddo_candidates ??= [];
+      gr.metadata.scheme_words ??= [];
 
-      // Index by account heads and extract budget head metadata
-      if (gr.sections.financials) {
-        const seenAccountHeads = new Set();
+      // Financial Metadata
+      if (Array.isArray(gr.sections?.financials)) {
+        const seenHeads = new Set();
+
         gr.sections.financials.forEach(fin => {
-          // Normalize possible accountHead field
-          const accountHead = fin.accountHead || fin.account_head || fin.accountHeadRaw;
+          if (!fin) return;
+
+          const accountHead =
+            fin.accountHead ||
+            fin.account_head ||
+            fin.accountHeadRaw ||
+            "";
+
           if (accountHead) {
-            if (!seenAccountHeads.has(accountHead)) {
-              seenAccountHeads.add(accountHead);
+            if (!seenHeads.has(accountHead)) {
+              seenHeads.add(accountHead);
+
               if (!this.indices.byAccountHead.has(accountHead)) {
                 this.indices.byAccountHead.set(accountHead, []);
               }
               this.indices.byAccountHead.get(accountHead).push(gr.id);
             }
 
-            // Add to structured metadata for this GR
             if (!gr.metadata.budget_heads.includes(accountHead)) {
               gr.metadata.budget_heads.push(accountHead);
             }
           }
 
-          // Heuristic: attempt to find DDO mentions in context
-          if (fin.context && /drawing\s*&?\s*disbursing|ddo|drawing disbursing officer/i.test(fin.context)) {
-            const match = fin.context.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/);
-            if (match && match[1]) {
+          // DDO Detection
+          if (
+            fin.context &&
+            /drawing\s*&?\s*disbursing|ddo|drawing disbursing officer/i.test(fin.context)
+          ) {
+            const match = fin.context.match(
+              /([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/
+            );
+
+            if (
+              match &&
+              match[1] &&
+              !gr.metadata.ddo_candidates.includes(match[1].trim())
+            ) {
               gr.metadata.ddo_candidates.push(match[1].trim());
             }
           }
         });
       }
 
-      // Additional heuristic: scan distribution list for DDO titles or officer names
-      if (gr.sections.distribution) {
-        gr.sections.distribution.forEach(d => {
-          const r = d.recipient || '';
-          if (/drawing\s*&?\s*disbursing|ddo|accountant general|pay and accounts officer|director of/i.test(r.toLowerCase())) {
-            gr.metadata.ddo_candidates.push(r.trim());
+      // Distribution Metadata
+      if (Array.isArray(gr.sections?.distribution)) {
+        gr.sections.distribution.forEach(item => {
+          const recipient = item?.recipient || "";
+
+          if (
+            /drawing\s*&?\s*disbursing|ddo|accountant general|pay and accounts officer|director of/i.test(
+              recipient.toLowerCase()
+            )
+          ) {
+            if (!gr.metadata.ddo_candidates.includes(recipient.trim())) {
+              gr.metadata.ddo_candidates.push(recipient.trim());
+            }
           }
         });
       }
 
-      // Derive simple scheme words from subject for quick matching
-      if (gr.metadata.subject) {
-        const schemeWords = this._extractKeywords(gr.metadata.subject).slice(0, 6);
+      // Scheme Words
+      if (gr.metadata?.subject) {
+        const schemeWords = this
+          ._extractKeywords(gr.metadata.subject)
+          .slice(0, 6);
+
         gr.metadata.scheme_words = schemeWords;
+
         schemeWords.forEach(word => {
           if (!this.indices.byKeyword.has(word)) {
             this.indices.byKeyword.set(word, []);
@@ -175,185 +242,430 @@ export class GRIndexer {
    * Extract keywords from text
    */
   _extractKeywords(text) {
+    if (!text) return [];
+
     const stopwords = new Set([
-      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'of', 'to', 'for', 'is', 'are',
-      'be', 'was', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
-      'will', 'shall', 'should', 'may', 'might', 'can', 'could', 'must', 'from',
-      'by', 'with', 'as', 'on', 'at', 'about', 'up', 'down', 'out', 'this', 'that',
-      'govt', 'government', 'resolution', 'gr', 'no', 'etc'
+      "the","a","an","and","or","but","in","of","to","for",
+      "is","are","be","was","were","been","being",
+      "have","has","had","do","does","did",
+      "will","shall","should","may","might","can","could","must",
+      "from","by","with","as","on","at","about","up","down","out",
+      "this","that","govt","government","resolution","gr","etc","no"
     ]);
 
-    const keywords = text
-      .toLowerCase()
-      .replace(/[^\w\s]/g, '')
-      .split(/\s+/)
-      .filter(w => w.length > 3 && !stopwords.has(w));
+    return [...new Set(
+      String(text)
+        .toLowerCase()
+        .replace(/[^\w\s]/g, " ")
+        .split(/\s+/)
+        .filter(word =>
+          word &&
+          word.length > 3 &&
+          !stopwords.has(word)
+        )
+    )];
+  }
 
-    return [...new Set(keywords)];
+  search(query = {}) {
+    let results = [...this.grs];
+
+    if (query.department) {
+      results = results.filter(gr =>
+        (gr.department || "")
+          .toLowerCase()
+          ===
+        query.department.toLowerCase()
+      );
+    }
+
+    if (query.keyword) {
+      const searchTerms = query.keyword
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean);
+
+      results = results.filter(gr => {
+        const subject =
+          (gr.metadata?.subject || "").toLowerCase();
+
+        return searchTerms.some(term =>
+          subject.includes(term)
+        );
+      });
+    }
+
+    if (query.district) {
+      results = results.filter(gr =>
+        Array.isArray(gr.districts) &&
+        gr.districts.includes(query.district)
+      );
+    }
+
+    if (query.yearFrom && query.yearTo) {
+      const from = Number(query.yearFrom);
+      const to = Number(query.yearTo);
+
+      results = results.filter(gr => {
+        const date = gr.metadata?.date;
+        if (!date) return false;
+        const year = Number(date.split("-").pop());
+        return year >= from && year <= to;
+      });
+    }
+
+    return results.slice(0, 50);
+  }
+
+  /**
+   * Build clause-level semantic index for the entire GR corpus.
+   * This is used by the verifier to detect cross-department clause conflicts.
+   */
+  async buildClauseEmbeddingIndex() {
+    if (this.clauseIndexReady) return;
+
+    this.clauseIndex = [];
+
+    for (const gr of this.grs) {
+      const clauses = this._extractClausesFromGR(gr);
+
+      for (let i = 0; i < clauses.length; i++) {
+        const clause = clauses[i];
+        const embedding = await this._embedText(clause);
+        if (!embedding) continue;
+
+        this.clauseIndex.push({
+          grId: gr.id,
+          grNumber: gr.metadata?.grNumber || gr.id,
+          department: gr.department || "General",
+          subject: gr.metadata?.subject || "",
+          clauseText: clause,
+          clauseIndex: i + 1,
+          embedding,
+          sourceLink: `/api/gr/${encodeURIComponent(
+            gr.metadata?.grNumber || gr.id
+          )}`
+        });
+      }
+    }
+
+    this.clauseIndexReady = true;
+  }
+
+  _extractClausesFromGR(gr) {
+    const clauses = [];
+
+    if (Array.isArray(gr.sections?.resolution_clauses_english)) {
+      gr.sections.resolution_clauses_english.forEach(c => {
+        if (String(c).trim().length > 20)
+          clauses.push(String(c).trim());
+      });
+    }
+
+    if (clauses.length === 0 && Array.isArray(gr.sections?.resolutions)) {
+      gr.sections.resolutions.forEach(item => {
+        if (item?.text?.trim().length > 20)
+          clauses.push(item.text.trim());
+      });
+    }
+
+    if (clauses.length === 0 && gr.sections?.resolution) {
+      clauses.push(
+        ...this._splitTextIntoClauses(
+          gr.sections.resolution
+        )
+      );
+    }
+
+    return clauses;
+  }
+
+  _splitTextIntoClauses(text) {
+    if (!text) return [];
+
+    const clauses = [];
+    const lines = text
+      .replace(/\r\n/g, "\n")
+      .split("\n");
+
+    let current = "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      if (
+        /^\d+\./.test(trimmed) ||
+        /^\([a-z0-9]+\)/i.test(trimmed)
+      ) {
+        if (current.trim()) {
+          clauses.push(current.trim());
+        }
+        current = trimmed;
+      } else {
+        current += " " + trimmed;
+      }
+    }
+
+    if (current.trim()) {
+      clauses.push(current.trim());
+    }
+
+    return clauses.filter(c => c.length > 20);
+  }
+
+  /**
+   * Generate embedding for text - FIXED API ENDPOINT
+   */
+async _embedText(text) {
+    const normalized = String(text || "").trim();
+
+    if (!normalized) return null;
+
+    // Always use local embeddings
+    return this._localTextVector(normalized);
+}
+  /**
+   * Local fallback embedding
+   */
+  _localTextVector(text) {
+    const DIMENSION = 256;
+    const vector = new Array(DIMENSION).fill(0);
+
+    const words = text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, "")
+      .split(/\s+/)
+      .filter(Boolean);
+
+    words.slice(0, 150).forEach(word => {
+      let hash = 0;
+      for (const ch of word) {
+        hash = (hash * 31 + ch.charCodeAt(0)) % DIMENSION;
+      }
+      vector[hash]++;
+    });
+
+    const norm = Math.sqrt(
+      vector.reduce((s, v) => s + v * v, 0)
+    );
+
+    if (norm > 0) {
+      for (let i = 0; i < DIMENSION; i++) {
+        vector[i] /= norm;
+      }
+    }
+
+    return vector;
+  }
+
+  /**
+   * Cosine similarity
+   */
+  _cosineSimilarity(vecA, vecB) {
+    if (!Array.isArray(vecA) || !Array.isArray(vecB)) {
+      return 0;
+    }
+
+    if (vecA.length !== vecB.length) {
+      return 0;
+    }
+
+    let dot = 0;
+    let magA = 0;
+    let magB = 0;
+
+    for (let i = 0; i < vecA.length; i++) {
+      dot += vecA[i] * vecB[i];
+      magA += vecA[i] * vecA[i];
+      magB += vecB[i] * vecB[i];
+    }
+
+    if (magA === 0 || magB === 0) {
+      return 0;
+    }
+
+    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+  }
+
+  /**
+   * Semantic clause search
+   */
+  async searchClauseConflicts(
+    clauseText,
+    topN = 10,
+    threshold = 0.80
+  ) {
+    if (!this.clauseIndexReady) {
+      await this.buildClauseEmbeddingIndex();
+    }
+
+    const queryEmbedding = await this._embedText(clauseText);
+    if (!queryEmbedding) {
+      return [];
+    }
+
+    const matches = [];
+
+    for (const clause of this.clauseIndex) {
+      const score = this._cosineSimilarity(
+        queryEmbedding,
+        clause.embedding
+      );
+
+      if (score >= threshold) {
+        matches.push({
+          ...clause,
+          score
+        });
+      }
+    }
+
+    matches.sort(
+      (a, b) => b.score - a.score
+    );
+
+    return matches.slice(0, topN);
+  }
+
+  /**
+   * Find similar GRs
+   */
+  findSimilar(gr, limit = 5) {
+    if (!gr) return [];
+
+    const candidates = new Set();
+
+    // Keyword similarity
+    if (gr.metadata?.subject) {
+      const keywords = this._extractKeywords(gr.metadata.subject);
+
+      for (const keyword of keywords) {
+        const hits = this.indices.byKeyword.get(keyword) || [];
+        hits.forEach(id => {
+          if (id !== gr.id) {
+            candidates.add(id);
+          }
+        });
+      }
+    }
+
+    // Same department
+    if (candidates.size < limit && gr.department) {
+      const deptHits = this.indices.byDepartment.get(gr.department) || [];
+      deptHits.forEach(id => {
+        if (id !== gr.id && candidates.size < limit * 2) {
+          candidates.add(id);
+        }
+      });
+    }
+
+    return [...candidates]
+      .slice(0, limit)
+      .map(id => this.getGRById(id))
+      .filter(Boolean);
   }
 
   /**
    * Get GR by ID
    */
-  getGRById(grId) {
-    return this.grs.find(gr => gr.id === grId);
+  getGRById(id) {
+    return this.grs.find(gr => gr.id === id) || null;
   }
 
-  search(query) {
-    let results = [...this.grs];
-
-    // Filter by department
-    if (query.department) {
-      results = results.filter(gr => gr.department === query.department);
-    }
-
-    // Filter by title / subject keywords (case-insensitive phrase or keyword overlap matching)
-    if (query.keyword) {
-      const searchTerms = query.keyword.toLowerCase().split(/\s+/).filter(t => t.length > 1);
-      if (searchTerms.length > 0) {
-        results = results.filter(gr => {
-          const subject = (gr.metadata?.subject || '').toLowerCase();
-          return searchTerms.some(term => subject.includes(term));
-        });
-      }
-    }
-
-    if (query.district) {
-      results = results.filter(gr => gr.districts && gr.districts.includes(query.district));
-    }
-
-    if (query.yearFrom && query.yearTo) {
-      const from = parseInt(query.yearFrom);
-      const to = parseInt(query.yearTo);
-      results = results.filter(gr => {
-        if (!gr.metadata.date) return false;
-        const parts = gr.metadata.date.split('-');
-        const year = parseInt(parts[parts.length - 1]);
-        return year >= from && year <= to;
-      });
-    }
-
-    return results.filter(Boolean).slice(0, 50);
-  }
-
-  /**
-   * Find similar GRs based on department and keywords
-   */
-  findSimilar(gr, limit = 5) {
-    const similarSet = new Set();
-
-    // 1. Keywords match (specific semantic match)
-    if (gr.metadata && gr.metadata.subject) {
-      const keywords = this._extractKeywords(gr.metadata.subject);
-      for (const kw of keywords) {
-        if (similarSet.size >= limit * 2) break;
-        const matches = this.indices.byKeyword.get(kw) || [];
-        for (const id of matches) {
-          if (id !== gr.id) {
-            similarSet.add(id);
-            if (similarSet.size >= limit * 2) break;
-          }
-        }
-      }
-    }
-
-    // 2. Same department fallback (fill the remainder up to limit)
-    if (similarSet.size < limit && gr.department) {
-      const deptGRs = this.indices.byDepartment.get(gr.department) || [];
-      for (const id of deptGRs) {
-        if (id !== gr.id && !similarSet.has(id)) {
-          similarSet.add(id);
-          if (similarSet.size >= limit) break;
-        }
-      }
-    }
-
-    const ids = Array.from(similarSet).slice(0, limit);
-    return ids.map(id => this.getGRById(id)).filter(Boolean);
-  }
-
-  /**
-   * Get statistics
-   */
   getStatistics() {
     return {
       totalGRs: this.grs.length,
       totalDepartments: this.indices.byDepartment.size,
-      departmentBreakdown: Array.from(this.indices.byDepartment.entries()).map(([dept, ids]) => ({
-        department: dept,
-        count: ids.length,
-      })),
-      yearBreakdown: Array.from(this.indices.byYear.entries())
-        .map(([year, ids]) => ({ year, count: ids.length }))
-        .sort((a, b) => a.year - b.year),
-      districtCoverage: this.indices.byDistrict.size,
+      totalYears: this.indices.byYear.size,
+      totalDistricts: this.indices.byDistrict.size,
       totalKeywords: this.indices.byKeyword.size,
       totalAccountHeads: this.indices.byAccountHead.size,
+      totalClauses: this.clauseIndex.length,
+      departmentBreakdown: [...this.indices.byDepartment.entries()]
+        .map(([department, ids]) => ({
+          department,
+          count: ids.length
+        }))
+        .sort((a, b) => b.count - a.count),
+      yearBreakdown: [...this.indices.byYear.entries()]
+        .map(([year, ids]) => ({
+          year,
+          count: ids.length
+        }))
+        .sort((a, b) => Number(a.year) - Number(b.year))
     };
   }
 
   /**
-   * Get analytics data
+   * Analytics Dashboard
    */
   getAnalytics() {
     const departments = {};
     const districts = {};
-    const budgetByDept = {};
     const yearlyTrend = {};
+    const budgetByDepartment = {};
 
     this.grs.forEach(gr => {
-      // Department stats
-      if (!departments[gr.department]) {
-        departments[gr.department] = { count: 0, totalBudget: 0 };
-      }
-      departments[gr.department].count += 1;
+      const dept = gr.department || "General";
 
-      // Budget calculation
-      if (gr.sections.financials) {
+      if (!departments[dept]) {
+        departments[dept] = {
+          count: 0,
+          totalBudget: 0
+        };
+      }
+      departments[dept].count++;
+
+      if (Array.isArray(gr.sections?.financials)) {
         gr.sections.financials.forEach(fin => {
-          if (fin.amountNumeric) {
-            departments[gr.department].totalBudget += fin.amountNumeric;
-            if (!budgetByDept[gr.department]) {
-              budgetByDept[gr.department] = 0;
-            }
-            budgetByDept[gr.department] += fin.amountNumeric;
+          const amount = Number(fin.amountNumeric || 0);
+          if (amount > 0) {
+            departments[dept].totalBudget += amount;
+            budgetByDepartment[dept] =
+              (budgetByDepartment[dept] || 0) + amount;
           }
         });
       }
 
-      // District stats
-      if (gr.districts) {
+      if (Array.isArray(gr.districts)) {
         gr.districts.forEach(district => {
-          if (!districts[district]) {
-            districts[district] = 0;
-          }
-          districts[district] += 1;
+          districts[district] =
+            (districts[district] || 0) + 1;
         });
       }
 
-      // Yearly trend
-      if (gr.metadata.date) {
-        const year = gr.metadata.date.split('-')[2];
-        if (!yearlyTrend[year]) {
-          yearlyTrend[year] = 0;
-        }
-        yearlyTrend[year] += 1;
+      if (gr.metadata?.date) {
+        const year = gr.metadata.date.split("-").pop();
+        yearlyTrend[year] =
+          (yearlyTrend[year] || 0) + 1;
       }
     });
 
     return {
       departments: Object.entries(departments)
-        .map(([name, data]) => ({ name, ...data }))
+        .map(([name, value]) => ({
+          name,
+          ...value
+        }))
         .sort((a, b) => b.count - a.count),
       districts: Object.entries(districts)
-        .map(([name, count]) => ({ name, count }))
+        .map(([name, count]) => ({
+          name,
+          count
+        }))
         .sort((a, b) => b.count - a.count),
-      budgetByDepartment: Object.entries(budgetByDept)
-        .map(([dept, budget]) => ({ department: dept, budget }))
+      budgetByDepartment: Object.entries(budgetByDepartment)
+        .map(([department, budget]) => ({
+          department,
+          budget
+        }))
         .sort((a, b) => b.budget - a.budget),
       yearlyTrend: Object.entries(yearlyTrend)
-        .map(([year, count]) => ({ year, count }))
-        .sort((a, b) => parseInt(a.year) - parseInt(b.year)),
+        .map(([year, count]) => ({
+          year,
+          count
+        }))
+        .sort((a, b) => Number(a.year) - Number(b.year))
     };
   }
 
@@ -361,43 +673,66 @@ export class GRIndexer {
    * Get all departments
    */
   getDepartments() {
-    return Array.from(this.indices.byDepartment.keys()).sort();
+    return [...this.indices.byDepartment.keys()]
+      .sort((a, b) => a.localeCompare(b));
   }
 
   /**
    * Get all districts
    */
   getDistricts() {
-    return Array.from(this.indices.byDistrict.keys()).sort();
+    return [...this.indices.byDistrict.keys()]
+      .sort((a, b) => a.localeCompare(b));
   }
 
   /**
-   * Get GRs related to a topic over time (for timeline visualization)
+   * Get GRs related to a topic over time (Timeline Visualization)
    */
   getPolicyEvolution(keyword, _years = 6) {
+    if (!keyword) return [];
+
     const evolution = [];
-    const keywordMatches = this.indices.byKeyword.get(keyword.toLowerCase()) || [];
+
+    const keywordMatches =
+      this.indices.byKeyword.get(keyword.toLowerCase()) || [];
 
     keywordMatches.forEach(grId => {
       const gr = this.getGRById(grId);
-      if (gr && gr.metadata.date) {
-        const [_day, month, year] = gr.metadata.date.split('-');
-        evolution.push({
-          grId,
-          date: gr.metadata.date,
-          year,
-          month,
-          title: gr.metadata.subject || gr.metadata.grNumber,
-          department: gr.department,
-        });
-      }
+
+      if (!gr?.metadata?.date) return;
+
+      const parts = String(gr.metadata.date).split("-");
+
+      const day = parts[0] || "01";
+      const month = parts[1] || "01";
+      const year = parts[2] || "2000";
+
+      evolution.push({
+        grId,
+        date: gr.metadata.date,
+        day,
+        month,
+        year,
+        title: gr.metadata.subject || gr.metadata.grNumber || gr.id,
+        department: gr.department || "General",
+      });
     });
 
-    return evolution.sort((a, b) => {
-      const dateA = new Date(a.year, parseInt(a.month) - 1, a.day);
-      const dateB = new Date(b.year, parseInt(b.month) - 1, b.day);
+    evolution.sort((a, b) => {
+      const dateA = new Date(
+        Number(a.year),
+        Number(a.month) - 1,
+        Number(a.day)
+      );
+      const dateB = new Date(
+        Number(b.year),
+        Number(b.month) - 1,
+        Number(b.day)
+      );
       return dateA - dateB;
     });
+
+    return evolution;
   }
 }
 

@@ -10,7 +10,7 @@ export class GRVerifier {
   /**
    * Verify a generated GR draft
    */
-  verify(draftGR) {
+  async verify(draftGR) {
     this.alerts = [];
 
     // Run basic verification checks
@@ -21,7 +21,11 @@ export class GRVerifier {
     this._checkDistrictJurisdiction(draftGR);
     this._checkFinancialOverrun(draftGR);
     this._checkTemporalConflicts(draftGR);
-    this._checkPolicyKnowledgeBaseConflicts(draftGR);
+    
+    // CRITICAL FIX: Run Policy Knowledge Base conflicts and capture the full audit result
+    const auditResult = this._checkPolicyKnowledgeBaseConflicts(draftGR);
+    
+    await this._checkSemanticClauseConflicts(draftGR);
 
     // Assign unique IDs to each alert if missing
     this.alerts = this.alerts.map((a, idx) => ({
@@ -48,8 +52,11 @@ export class GRVerifier {
         { id: 'reference', name: "Missing References Check", description: "Ensures the document correctly cites necessary precursor GRs.", passed: !hasCategory('reference') },
         { id: 'terminology', name: "Terminology Consistency Check", description: "Scans for deprecated, outdated, or inconsistent officer names/titles.", passed: !hasCategory('terminology') },
         { id: 'jurisdiction', name: "District Jurisdiction Check", description: "Checks if selected districts are within the department's active zones.", passed: !hasCategory('jurisdiction') },
-        { id: 'temporal', name: "Temporal Overlap Check", description: "Checks if an identical resolution has been published within the last 30 days.", passed: !hasCategory('temporal') }
-      ]
+        { id: 'temporal', name: "Temporal Overlap Check", description: "Checks if an identical resolution has been published within the last 30 days.", passed: !hasCategory('temporal') },
+        { id: 'semantic_conflict', name: "Semantic Clause Conflict Check", description: "Detects semantically similar clauses across departments.", passed: !hasCategory('semantic_conflict') }
+      ],
+      // CRITICAL FIX: Include the full audit result for frontend display
+      conflict_audit: auditResult
     };
   }
 
@@ -57,14 +64,14 @@ export class GRVerifier {
    * Check if account heads are deprecated (not used in recent GRs)
    */
   _checkDeprecatedAccountHeads(draftGR) {
-    if (!draftGR.sections.financials) return;
+    if (!draftGR.sections?.financials) return;
 
-    const recentYears = 2; // Check last 2 years
+    const recentYears = 2;
     const currentYear = new Date().getFullYear();
     const recentGRs = [];
 
     this.indexer.grs.forEach(gr => {
-      if (gr.metadata.date) {
+      if (gr.metadata?.date) {
         const grYear = parseInt(gr.metadata.date.split('-')[2]);
         if (grYear >= currentYear - recentYears) {
           recentGRs.push(gr);
@@ -75,7 +82,7 @@ export class GRVerifier {
     draftGR.sections.financials.forEach(fin => {
       if (fin.accountHead) {
         const found = recentGRs.some(gr => {
-          if (gr.sections.financials) {
+          if (gr.sections?.financials) {
             return gr.sections.financials.some(f => f.accountHead === fin.accountHead);
           }
           return false;
@@ -100,12 +107,11 @@ export class GRVerifier {
    * Check budget ceiling compliance
    */
   _checkBudgetCompliance(draftGR) {
-    if (!draftGR.sections.financials) return;
+    if (!draftGR.sections?.financials) return;
 
     const draftAmount = this._getTotalAmount(draftGR);
     if (draftAmount === 0) return;
 
-    // Find similar GRs (same department, similar subject)
     const similar = this.indexer.findSimilar(draftGR, 20);
     const similarAmounts = similar
       .map(gr => this._getTotalAmount(gr))
@@ -115,7 +121,6 @@ export class GRVerifier {
       const avgAmount = similarAmounts.reduce((a, b) => a + b) / similarAmounts.length;
       const maxAmount = Math.max(...similarAmounts);
 
-      // Alert if budget is significantly higher than average
       if (draftAmount > avgAmount * 2) {
         const sourceGr = similar.find(gr => this._getTotalAmount(gr) === maxAmount);
         this.alerts.push({
@@ -136,25 +141,23 @@ export class GRVerifier {
    * Check for policy conflicts with existing GRs
    */
   _checkPolicyConflicts(draftGR) {
-    if (!draftGR.metadata.subject) return;
+    if (!draftGR.metadata?.subject) return;
 
-    // Find GRs on same topic from same department
     const similar = this.indexer.findSimilar(draftGR, 10);
 
     similar.forEach(similarGR => {
-      // Check if there's a potential contradiction or overlap
       if (
-        similarGR.sections.resolutions &&
-        draftGR.sections.resolutions &&
+        similarGR.sections?.resolutions &&
+        draftGR.sections?.resolutions &&
         this._hasMutuallyExclusiveResolutions(draftGR, similarGR)
       ) {
         this.alerts.push({
           severity: 'critical',
           category: 'conflict',
           title: `Potential policy conflict detected`,
-          description: `This GR's mandates may conflict with existing policy in GR ${similarGR.metadata.grNumber} (${similarGR.metadata.date}).`,
+          description: `This GR's mandates may conflict with existing policy in GR ${similarGR.metadata?.grNumber || 'Unknown'} (${similarGR.metadata?.date || 'Unknown date'}).`,
           conflictingPhrase: draftGR.metadata.subject,
-          evidence: `Existing GR: ${similarGR.metadata.subject}`,
+          evidence: `Existing GR: ${similarGR.metadata?.subject || 'Unknown'}`,
           remediationSuggestion: 'Review resolution mandates to ensure consistency with prior policies.',
           sourceGrId: similarGR.id,
         });
@@ -162,9 +165,6 @@ export class GRVerifier {
     });
   }
 
-  /**
-   * Check if resolutions are mutually exclusive
-   */
   _hasMutuallyExclusiveResolutions(gr1, gr2) {
     const conflicts = [
       { word1: 'cancel', word2: 'renew' },
@@ -178,8 +178,8 @@ export class GRVerifier {
       gr2.sections.resolutions?.forEach(res2 => {
         conflicts.forEach(conflict => {
           if (
-            res1.text.toLowerCase().includes(conflict.word1) &&
-            res2.text.toLowerCase().includes(conflict.word2)
+            res1.text?.toLowerCase().includes(conflict.word1) &&
+            res2.text?.toLowerCase().includes(conflict.word2)
           ) {
             hasConflict = true;
           }
@@ -191,10 +191,10 @@ export class GRVerifier {
   }
 
   /**
-   * Check for missing or invalid references
+   * Check for missing references
    */
   _checkMissingReferences(draftGR) {
-    if (!draftGR.sections.references || draftGR.sections.references.length === 0) {
+    if (!draftGR.sections?.references || draftGR.sections.references.length === 0) {
       this.alerts.push({
         severity: 'medium',
         category: 'reference',
@@ -205,7 +205,6 @@ export class GRVerifier {
         sourceGrId: null,
       });
     } else {
-      // Check if referenced GRs exist in database
       draftGR.sections.references.forEach(ref => {
         if (ref.grNumber) {
           const found = this.indexer.indices.byGRNumber?.has(ref.grNumber);
@@ -235,14 +234,13 @@ export class GRVerifier {
       'Revenue Officer': 'Tahsildar',
     };
 
-    let text = (draftGR.metadata.subject || '') + ' ' + (draftGR.sections.resolutions?.map(r => r.text).join(' ') || '');
+    let text = (draftGR.metadata?.subject || '') + ' ' + (draftGR.sections?.resolutions?.map(r => r.text).join(' ') || '');
 
     Object.entries(outdatedTerms).forEach(([outdated, current]) => {
       if (text.includes(outdated)) {
-        // Check if current term is used elsewhere
         const similar = this.indexer.findSimilar(draftGR, 10);
         const useCurrent = similar.some(gr => {
-          const grText = (gr.metadata.subject || '') + ' ' + (gr.sections.resolutions?.map(r => r.text).join(' ') || '');
+          const grText = (gr.metadata?.subject || '') + ' ' + (gr.sections?.resolutions?.map(r => r.text).join(' ') || '');
           return grText.includes(current);
         });
 
@@ -266,10 +264,9 @@ export class GRVerifier {
    */
   _checkDistrictJurisdiction(draftGR) {
     if (!draftGR.districts || draftGR.districts.length === 0) {
-      return; // No district specified is OK
+      return;
     }
 
-    // Check if department typically issues GRs for these districts
     const deptGRs = this.indexer.indices.byDepartment.get(draftGR.department) || [];
     const deptDistricts = new Set();
 
@@ -281,7 +278,7 @@ export class GRVerifier {
     });
 
     draftGR.districts.forEach(district => {
-      if (!deptDistricts.has(district)) {
+      if (!deptDistricts.has(district) && deptDistricts.size > 0) {
         this.alerts.push({
           severity: 'low',
           category: 'jurisdiction',
@@ -299,17 +296,14 @@ export class GRVerifier {
    * Check for financial overruns
    */
   _checkFinancialOverrun(draftGR) {
-    if (!draftGR.sections.financials) return;
+    if (!draftGR.sections?.financials) return;
 
-    // Check total financial commitment
     const totalAmount = this._getTotalAmount(draftGR);
-
-    // Find annual budget ceiling for this department
     const deptGRs = this.indexer.indices.byDepartment.get(draftGR.department) || [];
     const deptGRsThisYear = deptGRs
       .map(id => this.indexer.getGRById(id))
       .filter(gr => {
-        if (gr && gr.metadata.date) {
+        if (gr && gr.metadata?.date) {
           const year = gr.metadata.date.split('-')[2];
           return year === new Date().getFullYear().toString();
         }
@@ -318,9 +312,7 @@ export class GRVerifier {
 
     const totalDeptBudgetThisYear = deptGRsThisYear.reduce((sum, gr) => sum + this._getTotalAmount(gr), 0);
 
-    // Alert if total + existing > threshold
     if (totalDeptBudgetThisYear + totalAmount > 500000000) {
-      // 500 crore threshold
       this.alerts.push({
         severity: 'high',
         category: 'budget',
@@ -335,18 +327,17 @@ export class GRVerifier {
   }
 
   /**
-   * Check for temporal conflicts (same policy issued twice in overlapping timeframes)
+   * Check for temporal conflicts
    */
   _checkTemporalConflicts(draftGR) {
-    if (!draftGR.metadata.date) return;
+    if (!draftGR.metadata?.date) return;
 
     const similar = this.indexer.findSimilar(draftGR, 10);
     const draftDate = new Date(draftGR.metadata.date.split('-').reverse().join('-'));
 
     similar.forEach(similarGR => {
-      if (similarGR.metadata.date) {
+      if (similarGR.metadata?.date) {
         const similarDate = new Date(similarGR.metadata.date.split('-').reverse().join('-'));
-        // Check if issued within 30 days
         const daysDiff = Math.abs((draftDate - similarDate) / (1000 * 60 * 60 * 24));
 
         if (daysDiff < 30 && draftGR.metadata.subject === similarGR.metadata.subject) {
@@ -369,8 +360,7 @@ export class GRVerifier {
    * Helper: Get total amount from a GR
    */
   _getTotalAmount(gr) {
-    if (!gr.sections.financials) return 0;
-
+    if (!gr.sections?.financials) return 0;
     return gr.sections.financials.reduce((sum, fin) => {
       return sum + (fin.amountNumeric || 0);
     }, 0);
@@ -378,9 +368,42 @@ export class GRVerifier {
 
   /**
    * Check for policy conflicts using the PolicyKnowledgeBase
+   * 
+   * CRITICAL FIX: This now returns the full audit result and properly adds alerts
    */
   _checkPolicyKnowledgeBaseConflicts(draftGR) {
-    const auditResult = this.knowledgeBase.auditPolicyConflicts(draftGR);
+    // Create a properly formatted input for the knowledge base
+    const auditInput = {
+      department: draftGR.department || draftGR.metadata?.departmentName,
+      department_name: draftGR.department || draftGR.metadata?.departmentName,
+      gr_type: draftGR.metadata?.intentType || draftGR.metadata?.grType,
+      intentType: draftGR.metadata?.intentType || draftGR.metadata?.grType,
+      subject: draftGR.metadata?.subject,
+      targeted_action: draftGR.metadata?.subject,
+      trigger_event: draftGR.metadata?.subject,
+      precise_amount_inr: this._getTotalAmount(draftGR) || 0,
+      budget: this._getTotalAmount(draftGR) || 0,
+      budget_head_15_digit: draftGR.sections?.financials?.[0]?.accountHead || '',
+      accountHead: draftGR.sections?.financials?.[0]?.accountHead || '',
+      drawing_disbursing_officer: draftGR.sections?.financials?.[0]?.ddo || '',
+      utilization_certificate_deadline: draftGR.metadata?.ucDeadline || '',
+      sections: draftGR.sections || {},
+      metadata: draftGR.metadata || {},
+      type_specific_variables: draftGR.metadata?.typeSpecificVariables || {}
+    };
+
+    // Run the audit
+    const auditResult = this.knowledgeBase.auditPolicyConflicts(auditInput);
+    
+    // Debug log
+    console.log('\n🔍 === GRVERIFIER: KNOWLEDGE BASE AUDIT RESULT ===');
+    console.log('Has Conflict:', auditResult.has_conflict);
+    console.log('Severity:', auditResult.severity);
+    console.log('Conflicts Count:', auditResult.conflicted_grs?.length || 0);
+    console.log('Conflict Details:', auditResult.conflict_details);
+    console.log('==================================================\n');
+
+    // Add alerts for each conflict
     if (auditResult.has_conflict && auditResult.conflicted_grs) {
       auditResult.conflicted_grs.forEach(c => {
         let sev = 'warning';
@@ -388,19 +411,150 @@ export class GRVerifier {
           sev = 'critical';
         } else if (c.severity === 'HIGH') {
           sev = 'high';
+        } else if (c.severity === 'MEDIUM') {
+          sev = 'medium';
         }
 
         this.alerts.push({
           severity: sev,
           category: 'conflict',
-          title: `Policy Conflict: ${c.department}`,
+          title: `🚨 Policy Conflict: ${c.department}`,
           description: c.reason,
           conflictingPhrase: draftGR.metadata?.subject || '',
+          evidence: `Source: ${c.grNumber}`,
           remediationSuggestion: `Review references or mandates in ${c.grNumber} and coordinate across departments if necessary.`,
-          sourceGrId: c.grNumber, // Links to precursor GR
+          sourceGrId: c.grNumber,
+          sourceDepartment: c.department,
+          linkUrl: c.linkUrl || `/api/gr/${encodeURIComponent(c.grNumber)}`
         });
       });
     }
+
+    // Return the full audit result for the frontend
+    return auditResult;
+  }
+
+  /**
+   * Semantic clause conflict detection
+   */
+  async _checkSemanticClauseConflicts(draftGR) {
+    if (!draftGR || !draftGR.sections) return;
+
+    // Check if indexer has the clause embedding index ready
+    if (!this.indexer.clauseIndexReady) {
+      await this.indexer.buildClauseEmbeddingIndex();
+    }
+
+    const threshold = parseFloat(process.env.SEMANTIC_CONFLICT_THRESHOLD || '0.80');
+    const topN = parseInt(process.env.SEMANTIC_CONFLICT_TOPN || '8', 10);
+    const clauses = this._extractDraftClauses(draftGR);
+    
+    if (clauses.length === 0) return;
+
+    const seenConflictKeys = new Set();
+
+    for (let idx = 0; idx < clauses.length; idx++) {
+      const clauseText = clauses[idx];
+      const matches = await this.indexer.searchClauseConflicts(clauseText, topN, threshold);
+      
+      matches.forEach(match => {
+        if (match.grId === draftGR.id) return;
+        const conflictKey = `${idx}-${match.grId}-${match.clauseIndex}`;
+        if (seenConflictKeys.has(conflictKey)) return;
+        seenConflictKeys.add(conflictKey);
+
+        const severity = match.score >= 0.92 ? 'critical' : match.score >= 0.86 ? 'high' : 'medium';
+        const conflictType = this._classifyClauseConflict(clauseText, match.clauseText);
+
+        this.alerts.push({
+          severity,
+          category: 'semantic_conflict',
+          title: `Semantic clause conflict detected (${match.department})`,
+          description: `Clause ${idx + 1} is semantically similar to clause ${match.clauseIndex} in GR ${match.grNumber} (${match.department}).`,
+          conflictingPhrase: clauseText.slice(0, 180),
+          evidence: `Matched clause: ${match.clauseText.slice(0, 180)} | Similarity: ${match.score.toFixed(3)}`,
+          remediationSuggestion: this._suggestResolution(clauseText, match.clauseText, conflictType),
+          sourceGrId: match.grId,
+          sourceDepartment: match.department,
+          sourceLink: match.sourceLink,
+          conflictType,
+          similarityScore: match.score
+        });
+      });
+    }
+  }
+
+  _extractDraftClauses(draftGR) {
+    const clauses = [];
+    if (draftGR.sections?.resolution_clauses_english && Array.isArray(draftGR.sections.resolution_clauses_english)) {
+      draftGR.sections.resolution_clauses_english.forEach(clause => {
+        if (clause && String(clause).trim().length > 20) {
+          clauses.push(String(clause).trim());
+        }
+      });
+    }
+
+    if (clauses.length === 0 && draftGR.sections?.resolutions) {
+      draftGR.sections.resolutions.forEach(item => {
+        if (item?.text && String(item.text).trim().length > 20) {
+          clauses.push(String(item.text).trim());
+        }
+      });
+    }
+
+    if (clauses.length === 0 && draftGR.sections?.resolution) {
+      const text = String(draftGR.sections.resolution || '');
+      clauses.push(...this._splitTextIntoClauses(text));
+    }
+
+    return clauses;
+  }
+
+  _splitTextIntoClauses(text) {
+    const results = [];
+    if (!text || !text.trim()) return results;
+
+    const normalized = text.replace(/\r\n/g, '\n');
+    const lines = normalized.split('\n');
+    let buffer = '';
+
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      if (/^\d+\./.test(trimmed) || /^\([a-z0-9]+\)/i.test(trimmed)) {
+        if (buffer.trim()) {
+          results.push(buffer.trim());
+        }
+        buffer = trimmed;
+      } else {
+        buffer += ' ' + trimmed;
+      }
+    });
+
+    if (buffer.trim()) {
+      results.push(buffer.trim());
+    }
+
+    return results.filter(c => c.length > 20);
+  }
+
+  _classifyClauseConflict(clauseA, clauseB) {
+    const lowKeywords = ['duplicate', 'similar', 'same', 'also', 'repeat'];
+    const highKeywords = ['conflict', 'contradict', 'unless', 'except', 'not'];
+    const text = `${clauseA} ${clauseB}`.toLowerCase();
+    if (highKeywords.some(word => text.includes(word))) return 'contradiction';
+    if (lowKeywords.some(word => text.includes(word))) return 'duplication';
+    return 'overlap';
+  }
+
+  _suggestResolution(clauseA, clauseB, conflictType) {
+    if (conflictType === 'contradiction') {
+      return 'Review both clauses for opposing mandates and align the new GR with the earlier policy or seek departmental concurrence.';
+    }
+    if (conflictType === 'duplication') {
+      return 'Verify whether this clause is already covered by the referenced GR and avoid redundant provisions.';
+    }
+    return 'Review the overlapping policy intent across departments and consolidate or clarify the clause wording.';
   }
 
   /**
@@ -435,7 +589,7 @@ export class GRVerifier {
     if (fieldName === 'drawing_disbursing_officer') {
       let matches = [];
       if (this.indexer) {
-        matches = this.indexer.search({ query: val, limit: 3 });
+        matches = this.indexer.search({ keyword: val, limit: 3 });
       }
       if (matches.length > 0) {
         return { valid: true, status: 'verified', message: `✅ Verified Officer title (Matches ${matches.length} historical GRs)` };
@@ -445,8 +599,8 @@ export class GRVerifier {
 
     if (fieldName === 'precise_amount_inr' || fieldName === 'budget') {
       const num = Number(val);
-      if (num > 40000000) {
-        return { valid: false, status: 'critical', message: `🚨 CRITICAL: ₹${(num / 10000000).toFixed(2)} Crores exceeds Parent Finance Cap (₹4.00 Crores). Requires Cabinet approval.` };
+      if (num > 100000000) {
+        return { valid: false, status: 'critical', message: `🚨 CRITICAL: ₹${(num / 10000000).toFixed(2)} Crores exceeds Parent Finance Cap (₹10.00 Crores). Requires Cabinet approval.` };
       }
       return { valid: true, status: 'verified', message: '✅ Amount within standard departmental sanction ceiling.' };
     }

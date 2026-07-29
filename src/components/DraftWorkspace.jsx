@@ -22,6 +22,41 @@ export default function DraftWorkspace({ currentGR }) {
   const [loadingSimilar, setLoadingSimilar] = useState(false);
   const [loadingReference, setLoadingReference] = useState(false);
 
+  // ============================================
+  // MERGE CONFLICT AUDIT INTO ALERTS
+  // ============================================
+  const mergeConflictAudit = (grData, existingAlerts) => {
+    const merged = [...existingAlerts];
+    
+    if (grData?.conflict_audit?.conflicted_grs) {
+      const conflictAlerts = grData.conflict_audit.conflicted_grs.map((c, idx) => ({
+        id: `conflict-${c.grNumber || c.sourceGrId || 'unknown'}-${idx}-${Date.now()}`,
+        severity: c.severity ? c.severity.toLowerCase() : 'high',
+        category: 'conflict',
+        title: `🚨 ${c.severity || 'Policy'}: ${c.department || 'Unknown Department'}`,
+        description: c.reason || c.conflict_details || 'Policy conflict detected',
+        evidence: `Source: ${c.grNumber || 'Unknown'}`,
+        remediationSuggestion: c.remediationSuggestion || `Review references or mandates in ${c.grNumber} and coordinate across departments if necessary.`,
+        sourceGrId: c.grNumber || c.sourceGrId,
+        sourceDepartment: c.department,
+        linkUrl: c.linkUrl || `/api/gr/${encodeURIComponent(c.grNumber || '')}`,
+        autoResolvable: false,
+        conflictType: c.conflictType || 'policy',
+        similarityScore: c.similarityScore || null
+      }));
+      
+      // Merge without duplicates (by sourceGrId)
+      const existingIds = new Set(merged.map(a => a.sourceGrId).filter(Boolean));
+      const newAlerts = conflictAlerts.filter(c => !existingIds.has(c.sourceGrId));
+      merged.push(...newAlerts);
+      
+      console.log('🔍 Merged Conflict Alerts:', conflictAlerts.length);
+      console.log('🔍 New Alerts Added:', newAlerts.length);
+    }
+    
+    return merged;
+  };
+
   useEffect(() => {
     const fetchSimilar = async () => {
       setLoadingSimilar(true);
@@ -106,13 +141,28 @@ export default function DraftWorkspace({ currentGR }) {
     }
   };
 
+  // ============================================
+  // FETCH GR AND ALERTS - WITH CONFLICT MERGE
+  // ============================================
   useEffect(() => {
     const fetchGRAndAlerts = async () => {
       try {
         const response = await axios.get(`http://localhost:5000/api/gr/${grId}`);
-        setGr(response.data.gr);
-        setAlerts(response.data.alerts || []);
-        setChecksRun(response.data.checksRun || []);
+        const grData = response.data.gr;
+        const alertsData = response.data.alerts || [];
+        const checksRunData = response.data.checksRun || [];
+        
+        setGr(grData);
+        
+        // Merge conflict_audit into alerts
+        const mergedAlerts = mergeConflictAudit(grData, alertsData);
+        setAlerts(mergedAlerts);
+        setChecksRun(checksRunData);
+        
+        console.log('📊 Fetched GR:', grData.id);
+        console.log('📊 Conflict Audit:', grData?.conflict_audit);
+        console.log('📊 Total Alerts:', mergedAlerts.length);
+        
       } catch (error) {
         console.error('Failed to fetch GR and alerts:', error);
       }
@@ -123,14 +173,17 @@ export default function DraftWorkspace({ currentGR }) {
     }
   }, [grId, location.state]);
 
-  // Reactive Instant Verification (1-second debounce)
+  // ============================================
+  // REACTIVE INSTANT VERIFICATION
+  // ============================================
   useEffect(() => {
     if (gr && savedStatus === 'unsaved') {
       const delayVerify = setTimeout(async () => {
         try {
           const response = await axios.post('http://localhost:5000/api/gr/verify-dryrun', gr);
           if (response.data) {
-            setAlerts(response.data.alerts || []);
+            const mergedAlerts = mergeConflictAudit(gr, response.data.alerts || []);
+            setAlerts(mergedAlerts);
             setChecksRun(response.data.checksRun || []);
           }
         } catch (e) {
@@ -142,7 +195,9 @@ export default function DraftWorkspace({ currentGR }) {
     }
   }, [gr, savedStatus]);
 
-  // Reactive Autosave (3-second debounce)
+  // ============================================
+  // REACTIVE AUTOSAVE
+  // ============================================
   useEffect(() => {
     if (gr && savedStatus === 'unsaved') {
       const delayAutosave = setTimeout(async () => {
@@ -150,10 +205,12 @@ export default function DraftWorkspace({ currentGR }) {
         try {
           const response = await axios.post('http://localhost:5000/api/gr/save', gr);
           setSavedStatus('saved');
-          if (response.data.verification) {
-            setAlerts(response.data.verification.alerts || []);
-            setChecksRun(response.data.verification.checksRun || []);
-          }
+          
+          // Merge verification alerts with conflict_audit
+          const mergedAlerts = mergeConflictAudit(response.data.gr || gr, response.data.verification?.alerts || []);
+          setAlerts(mergedAlerts);
+          setChecksRun(response.data.verification?.checksRun || []);
+          
         } catch (error) {
           setSavedStatus('error');
           console.error('Autosave failed:', error);
@@ -175,28 +232,30 @@ export default function DraftWorkspace({ currentGR }) {
     }));
   };
 
+  // ============================================
+  // HANDLE SAVE - WITH CONFLICT MERGE
+  // ============================================
   const handleSave = async () => {
     setSavedStatus('saving');
     try {
       const response = await axios.post(`http://localhost:5000/api/gr/save`, gr);
       setSavedStatus('saved');
-      if (response.data.verification) {
-        setAlerts(response.data.verification.alerts || []);
-        setChecksRun(response.data.verification.checksRun || []);
-      }
+      
+      // Merge verification alerts with conflict_audit
+      const mergedAlerts = mergeConflictAudit(response.data.gr || gr, response.data.verification?.alerts || []);
+      setAlerts(mergedAlerts);
+      setChecksRun(response.data.verification?.checksRun || []);
+      
     } catch (error) {
       setSavedStatus('error');
       alert('Failed to save: ' + error.message);
     }
   };
 
-
-
   const renderHighlightedText = (text, keyword) => {
     if (!text) return 'N/A';
     if (!keyword) return text;
     
-    // Split by case-insensitive keyword
     const parts = text.split(new RegExp(`(${keyword})`, 'gi'));
     return (
       <>
@@ -213,6 +272,9 @@ export default function DraftWorkspace({ currentGR }) {
     setAlerts(prev => prev.filter((a, idx) => (a.id ? a.id !== alertId : idx !== targetIdx)));
   };
 
+  // ============================================
+  // HANDLE SUBMIT
+  // ============================================
   const handleSubmit = async () => {
     if (alerts.length > 0) {
       alert(`⚠️ Please resolve (Auto-Fix) or dismiss all ${alerts.length} alerts before submitting.`);
@@ -229,10 +291,9 @@ export default function DraftWorkspace({ currentGR }) {
       const updatedGr = { 
         ...gr, 
         status: nextStatus,
-        rejectedBy: null // Clear once re-submitted
+        rejectedBy: null
       };
 
-      // 5-second artificial delay to visually show the progress steps (HCI concept)
       await new Promise(resolve => setTimeout(resolve, 5000));
 
       const response = await axios.post(`http://localhost:5000/api/gr/save`, updatedGr);
@@ -260,8 +321,6 @@ export default function DraftWorkspace({ currentGR }) {
   if (!gr) {
     return <div className="draft-workspace">Loading...</div>;
   }
-
-
 
   const renderSectionContent = (sectionKey, originalContent) => {
     const hasStagedChange = proposedChange && proposedChange.updatedGr?.sections?.[sectionKey] !== gr.sections?.[sectionKey];
@@ -400,18 +459,20 @@ export default function DraftWorkspace({ currentGR }) {
         </div>
       </div>
 
-      {/* POLICY CONFLICT AUDIT WARNING BANNER */}
+      {/* ============================================
+          POLICY CONFLICT AUDIT WARNING BANNER
+          ============================================ */}
       {alerts.length > 0 && (
         <div style={{
-          background: alerts.some(a => a.severity === 'critical') ? '#FEE2E2' : '#FEF3C7',
-          border: `2px solid ${alerts.some(a => a.severity === 'critical') ? '#DC2626' : '#D97706'}`,
+          background: alerts.some(a => a.severity === 'critical' || a.severity === 'CRITICAL') ? '#FEE2E2' : '#FEF3C7',
+          border: `2px solid ${alerts.some(a => a.severity === 'critical' || a.severity === 'CRITICAL') ? '#DC2626' : '#D97706'}`,
           borderRadius: '8px',
           padding: '20px',
           marginBottom: '20px',
-          color: alerts.some(a => a.severity === 'critical') ? '#7F1D1D' : '#78350F'
+          color: alerts.some(a => a.severity === 'critical' || a.severity === 'CRITICAL') ? '#7F1D1D' : '#78350F'
         }}>
           <h3 style={{ margin: '0 0 12px 0', fontSize: '18px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: '8px' }}>
-            🚨 TASK A: POLICY & CONFLICT AUDITING ALERT ({alerts.some(a => a.severity === 'critical') ? 'CRITICAL' : 'WARNING'})
+            🚨 TASK A: POLICY & CONFLICT AUDITING ALERT ({alerts.filter(a => a.severity === 'critical' || a.severity === 'CRITICAL').length > 0 ? 'CRITICAL' : 'WARNING'})
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {alerts.map((alert, idx) => {
@@ -422,10 +483,13 @@ export default function DraftWorkspace({ currentGR }) {
                 highlightWord = found;
               }
 
+              // Determine if this is a conflict from the audit
+              const isConflict = alert.category === 'conflict';
+
               return (
                 <div key={idx} style={{
                   background: 'rgba(255, 255, 255, 0.95)',
-                  border: '1px solid rgba(0, 0, 0, 0.05)',
+                  border: isConflict ? '2px solid #DC2626' : '1px solid rgba(0, 0, 0, 0.05)',
                   borderRadius: '6px',
                   padding: '14px 18px',
                   fontSize: '13.5px',
@@ -435,7 +499,8 @@ export default function DraftWorkspace({ currentGR }) {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <div style={{ fontWeight: '800', fontSize: '14.5px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      📌 {alert.title || alert.category || 'Policy Conflict'}
+                      {isConflict ? '🚨' : '📌'} {alert.title || alert.category || 'Policy Conflict'}
+                      {isConflict && <span style={{ fontSize: '10px', background: '#DC2626', color: 'white', padding: '2px 8px', borderRadius: '12px' }}>CONFLICT</span>}
                     </div>
                     <span style={{ 
                       fontSize: '10px', 
@@ -444,9 +509,11 @@ export default function DraftWorkspace({ currentGR }) {
                       padding: '2px 6px', 
                       borderRadius: '3px',
                       color: 'white',
-                      backgroundColor: alert.severity === 'critical' ? '#d32f2f' : '#f57c00'
+                      backgroundColor: (alert.severity === 'critical' || alert.severity === 'CRITICAL') ? '#d32f2f' : 
+                                     (alert.severity === 'high' || alert.severity === 'HIGH') ? '#f57c00' : 
+                                     (alert.severity === 'medium' || alert.severity === 'MEDIUM') ? '#f59e0b' : '#64748b'
                     }}>
-                      {alert.severity}
+                      {alert.severity || 'WARNING'}
                     </span>
                   </div>
                   <div style={{ marginBottom: '8px' }}>
@@ -565,9 +632,7 @@ export default function DraftWorkspace({ currentGR }) {
             {renderSectionContent('introduction', gr.sections.introduction)}
           </div>
 
-
-
-          {/* Similar Resolutions (Historical context library) */}
+          {/* Similar Resolutions */}
           <div className="section-card">
             <div className="section-header">
               <h4>📚 Similar Resolutions (शासन निर्णय लायब्ररी)</h4>
@@ -740,8 +805,6 @@ export default function DraftWorkspace({ currentGR }) {
               </div>
             </div>
           )}
-
-          {/* Verification Alerts Section has been merged into the top warning banner */}
         </div>
       </div>
 
@@ -768,7 +831,6 @@ export default function DraftWorkspace({ currentGR }) {
           </button>
         </div>
       </div>
-
 
       {/* Referenced GR Document Viewer Modal */}
       {selectedReferenceGR && (
@@ -845,7 +907,7 @@ export default function DraftWorkspace({ currentGR }) {
                   </tbody>
                 </table>
 
-                {/* Introduction (प्रस्तावना) */}
+                {/* Introduction */}
                 {selectedReferenceGR.sections?.introduction && (
                   <div style={{ marginBottom: '20px' }}>
                     <h5 style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px', textTransform: 'uppercase', margin: '15px 0 8px 0', color: '#0f172a' }}>
@@ -857,7 +919,7 @@ export default function DraftWorkspace({ currentGR }) {
                   </div>
                 )}
 
-                {/* References (संदर्भ) */}
+                {/* References */}
                 {selectedReferenceGR.sections?.references && selectedReferenceGR.sections.references.length > 0 && (
                   <div style={{ marginBottom: '20px' }}>
                     <h5 style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px', textTransform: 'uppercase', margin: '15px 0 8px 0', color: '#0f172a' }}>
@@ -873,7 +935,7 @@ export default function DraftWorkspace({ currentGR }) {
                   </div>
                 )}
 
-                {/* Resolution (शासन निर्णय) */}
+                {/* Resolution */}
                 <div style={{ marginBottom: '20px' }}>
                   <h5 style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px', textTransform: 'uppercase', margin: '15px 0 8px 0', color: '#0f172a' }}>
                     Resolution (शासन निर्णय)
@@ -891,7 +953,7 @@ export default function DraftWorkspace({ currentGR }) {
                   )}
                 </div>
 
-                {/* Financials (वित्तीय तपशील) */}
+                {/* Financials */}
                 {selectedReferenceGR.sections?.financials && selectedReferenceGR.sections.financials.length > 0 && (
                   <div style={{ marginBottom: '20px' }}>
                     <h5 style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px', textTransform: 'uppercase', margin: '15px 0 8px 0', color: '#0f172a' }}>
@@ -920,7 +982,7 @@ export default function DraftWorkspace({ currentGR }) {
                   </div>
                 )}
 
-                {/* Distribution (वितरण) */}
+                {/* Distribution */}
                 {selectedReferenceGR.sections?.distribution && selectedReferenceGR.sections.distribution.length > 0 && (
                   <div style={{ marginBottom: '20px' }}>
                     <h5 style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px', textTransform: 'uppercase', margin: '15px 0 8px 0', color: '#0f172a' }}>
@@ -944,7 +1006,7 @@ export default function DraftWorkspace({ currentGR }) {
         </div>
       )}
 
-      {/* Fullscreen Submitting Overlay (Stepped Progress Checklist - HCI Concept) */}
+      {/* Fullscreen Submitting Overlay */}
       {submitting && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -963,7 +1025,7 @@ export default function DraftWorkspace({ currentGR }) {
           fontFamily: 'system-ui, -apple-system, sans-serif'
         }}>
           <div style={{ textAlign: 'center', maxWidth: '500px', width: '90%' }}>
-            {/* Saffron-Green Tricolor Spinner with Pulsing Rajmudra Emblem */}
+            {/* Saffron-Green Tricolor Spinner */}
             <div style={{ position: 'relative', width: '80px', height: '80px', margin: '0 auto 30px auto' }}>
               <div style={{
                 position: 'absolute',

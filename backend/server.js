@@ -8,9 +8,11 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import GRParser from './services/grParser.js';
 import GRIndexer from './services/grIndexer.js';
 import GRVerifier from './services/grVerifier.js';
+// Fixed import - note the class name is now grGenerator (lowercase g)
 import GRGenerator from './services/grGenerator.js';
 import GRAssistant from './services/grAssistant.js';
 import {
@@ -23,26 +25,30 @@ import {
   getAllGRs,
 } from './db.js';
 
+// Get current directory (backend folder)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load .env variables manually into process.env
-const envPath = path.resolve(process.cwd(), '.env');
+// Load .env from backend folder FIRST
+const envPath = path.join(__dirname, '.env');
+console.log(`📁 Loading .env from: ${envPath}`);
+
 if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  envContent.split('\n').forEach(line => {
-    const cleanLine = line.trim();
-    if (cleanLine && !cleanLine.startsWith('#')) {
-      const equalIndex = cleanLine.indexOf('=');
-      if (equalIndex > 0) {
-        const key = cleanLine.substring(0, equalIndex).trim();
-        const value = cleanLine.substring(equalIndex + 1).trim();
-        const cleanValue = value.replace(/^['"]|['"]$/g, '');
-        process.env[key] = cleanValue;
-      }
-    }
-  });
+  console.log('✅ .env file found in backend folder!');
+  dotenv.config({ path: envPath });
+} else {
+  console.error('❌ .env file NOT found in backend folder!');
+  console.log('💡 Create /backend/.env with your API keys');
+  dotenv.config();
 }
+
+// Debug: Show what was loaded
+console.log('\n🔑 API Configuration:');
+console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✅ Set' : '❌ Not set');
+console.log('OPENROUTER_API_KEY:', process.env.OPENROUTER_API_KEY ? '✅ Set' : '❌ Not set');
+console.log('ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? '✅ Set' : '❌ Not set');
+console.log('PORT:', process.env.PORT || '5000 (default)');
+console.log('');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -57,6 +63,27 @@ let verifier = null;
 let generator = null;
 let assistant = null;
 
+// API Key Validation Helper
+function validateApiKey(key, type) {
+  if (!key || key.trim() === '') {
+    return { valid: false, error: `${type} API key is missing or empty` };
+  }
+  
+  if (type === 'gemini' && !key.startsWith('AIza')) {
+    return { valid: false, error: 'Invalid Gemini API key format. Should start with "AIza"' };
+  }
+  
+  if (type === 'openrouter' && key.length < 20) {
+    return { valid: false, error: 'OpenRouter API key seems too short' };
+  }
+  
+  if (type === 'anthropic' && !key.startsWith('sk-ant-')) {
+    return { valid: false, error: 'Invalid Anthropic API key format. Should start with "sk-ant-"' };
+  }
+  
+  return { valid: true };
+}
+
 /**
  * Initialize backend: Parse all GRs and build indices
  */
@@ -64,18 +91,21 @@ async function initializeBackend() {
   console.log('🚀 Initializing backend...');
 
   try {
-    // Initialize database
     await initDB();
     console.log('✅ Database initialized');
 
-    // Initialize parser
     const parser = new GRParser();
     console.log('✅ Parser ready');
 
-    // Parse all GRs
     const dataPath = path.join(__dirname, 'data', 'GRs');
+    
+    if (!fs.existsSync(dataPath)) {
+      console.warn(`⚠️ Data directory not found: ${dataPath}`);
+      console.log('📁 Creating sample data structure...');
+      fs.mkdirSync(dataPath, { recursive: true });
+    }
+    
     const departments = fs.readdirSync(dataPath);
-
     const allParsedGRs = [];
     let grCount = 0;
 
@@ -91,50 +121,116 @@ async function initializeBackend() {
 
     console.log(`✅ Parsed ${grCount} total Government Resolutions`);
 
-    // Build indices
     indexer = new GRIndexer();
     indexer.indexGRs(allParsedGRs);
     console.log('✅ Indices built');
 
-    // Initialize verifier
     verifier = new GRVerifier(indexer);
     console.log('✅ Verifier ready');
 
-    // Build Policy Knowledge Base
-    verifier.knowledgeBase.buildKnowledgeBase();
+    if (verifier.knowledgeBase) {
+      verifier.knowledgeBase.buildKnowledgeBase();
+    }
 
-    // Initialize generator (requires API key)
+    // Initialize generator with API key validation
     const geminiKey = process.env.GEMINI_API_KEY;
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
+    let apiConfigured = false;
+    let apiErrors = [];
+
+    // Try Gemini first
     if (geminiKey) {
-      const geminiModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-      generator = new GRGenerator(indexer, { type: 'gemini', key: geminiKey, model: geminiModel });
-      console.log(`✅ Generator ready (Gemini ${geminiModel} enabled - Free Tier Compatible)`);
-    } else if (openrouterKey) {
-      const openrouterModel = process.env.OPENROUTER_MODEL || 'meta-llama/llama-3-8b-instruct:free';
-      generator = new GRGenerator(indexer, { type: 'openrouter', key: openrouterKey, model: openrouterModel });
-      console.log(`✅ Generator ready (OpenRouter ${openrouterModel} enabled - 100% Free Models)`);
-    } else if (anthropicKey) {
-      generator = new GRGenerator(indexer, { type: 'claude', key: anthropicKey });
-      console.log('✅ Generator ready (Claude API enabled)');
-    } else {
-      generator = new GRGenerator(indexer, { type: 'fallback' });
-      console.log('ℹ️  No API key configured - Generator initialized in Local Fallback mode');
+      const validation = validateApiKey(geminiKey, 'gemini');
+      if (validation.valid) {
+        try {
+          const geminiModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+          generator = new GRGenerator(indexer, { 
+            type: 'gemini', 
+            key: geminiKey, 
+            model: geminiModel 
+          });
+          console.log(`✅ Generator ready (Gemini ${geminiModel} enabled)`);
+          apiConfigured = true;
+        } catch (error) {
+          apiErrors.push(`Gemini initialization failed: ${error.message}`);
+          console.error(`❌ Gemini initialization failed:`, error.message);
+        }
+      } else {
+        apiErrors.push(`Gemini validation failed: ${validation.error}`);
+        console.warn(`⚠️ ${validation.error}`);
+      }
     }
 
-    // Initialize Assistant for 98k GR Conversational AI Search
-    assistant = new GRAssistant(indexer);
-    console.log('✅ AI Policy Search Assistant ready (98,000+ GR Knowledge Base)');
+    // Try OpenRouter if Gemini failed
+    if (!apiConfigured && openrouterKey) {
+      const validation = validateApiKey(openrouterKey, 'openrouter');
+      if (validation.valid) {
+        try {
+          const openrouterModel = process.env.OPENROUTER_MODEL || 'meta-llama/llama-3-8b-instruct:free';
+          generator = new GRGenerator(indexer, { 
+            type: 'openrouter', 
+            key: openrouterKey, 
+            model: openrouterModel 
+          });
+          console.log(`✅ Generator ready (OpenRouter ${openrouterModel} enabled)`);
+          apiConfigured = true;
+        } catch (error) {
+          apiErrors.push(`OpenRouter initialization failed: ${error.message}`);
+          console.error(`❌ OpenRouter initialization failed:`, error.message);
+        }
+      } else {
+        apiErrors.push(`OpenRouter validation failed: ${validation.error}`);
+        console.warn(`⚠️ ${validation.error}`);
+      }
+    }
 
-    // Log statistics
-    const stats = indexer.getStatistics();
-    console.log(`\n📊 Database Statistics:`);
-    console.log(`   Total GRs: ${stats.totalGRs}`);
-    console.log(`   Departments: ${stats.totalDepartments}`);
-    console.log(`   Districts: ${stats.districtCoverage}`);
-    console.log(`   Years covered: ${stats.yearBreakdown.length}`);
+    // Try Anthropic
+    if (!apiConfigured && anthropicKey) {
+      const validation = validateApiKey(anthropicKey, 'anthropic');
+      if (validation.valid) {
+        try {
+          generator = new GRGenerator(indexer, { 
+            type: 'claude', 
+            key: anthropicKey 
+          });
+          console.log('✅ Generator ready (Claude API enabled)');
+          apiConfigured = true;
+        } catch (error) {
+          apiErrors.push(`Anthropic initialization failed: ${error.message}`);
+          console.error(`❌ Anthropic initialization failed:`, error.message);
+        }
+      } else {
+        apiErrors.push(`Anthropic validation failed: ${validation.error}`);
+        console.warn(`⚠️ ${validation.error}`);
+      }
+    }
+
+    // Fallback mode
+    if (!apiConfigured) {
+      generator = new GRGenerator(indexer, { type: 'fallback' });
+      console.log('ℹ️  Generator initialized in Local Fallback mode');
+      if (apiErrors.length > 0) {
+        console.log('   API errors encountered:');
+        apiErrors.forEach(err => console.log(`   - ${err}`));
+      } else {
+        console.log('   No API keys configured - using local fallback');
+        console.log('   💡 To enable AI generation, add API keys to /backend/.env');
+      }
+    }
+
+    assistant = new GRAssistant(indexer);
+    console.log('✅ AI Policy Search Assistant ready');
+
+    if (indexer && typeof indexer.getStatistics === 'function') {
+      const stats = indexer.getStatistics();
+      console.log(`\n📊 Database Statistics:`);
+      console.log(`   Total GRs: ${stats.totalGRs || 0}`);
+      console.log(`   Departments: ${stats.totalDepartments || 0}`);
+      console.log(`   Districts: ${stats.districtCoverage || 0}`);
+      console.log(`   Years covered: ${stats.yearBreakdown ? stats.yearBreakdown.length : 0}`);
+    }
 
     return true;
   } catch (error) {
@@ -149,15 +245,49 @@ async function initializeBackend() {
 
 // Health check
 app.get('/health', (req, res) => {
+  const apiStatus = {
+    configured: generator !== null,
+    type: generator ? generator.config?.type || 'unknown' : 'none',
+    ready: generator && generator.ready !== false
+  };
+  
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     indexerReady: indexer !== null,
     generatorReady: generator !== null,
+    apiStatus: apiStatus,
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// Get dashboard statistics
+// Get API status
+app.get('/api/status', (req, res) => {
+  const apiKeyStatus = {
+    gemini: {
+      configured: !!process.env.GEMINI_API_KEY,
+      valid: process.env.GEMINI_API_KEY ? validateApiKey(process.env.GEMINI_API_KEY, 'gemini').valid : false,
+      model: process.env.GEMINI_MODEL || 'gemini-1.5-flash'
+    },
+    openrouter: {
+      configured: !!process.env.OPENROUTER_API_KEY,
+      valid: process.env.OPENROUTER_API_KEY ? validateApiKey(process.env.OPENROUTER_API_KEY, 'openrouter').valid : false,
+      model: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3-8b-instruct:free'
+    },
+    anthropic: {
+      configured: !!process.env.ANTHROPIC_API_KEY,
+      valid: process.env.ANTHROPIC_API_KEY ? validateApiKey(process.env.ANTHROPIC_API_KEY, 'anthropic').valid : false
+    },
+    active: {
+      type: generator ? generator.config?.type : 'none',
+      ready: generator && generator.ready !== false
+    }
+  };
+  
+  res.json(apiKeyStatus);
+});
+
+// Dashboard statistics
 app.get('/api/analytics/dashboard', (req, res) => {
   if (!indexer) {
     return res.status(503).json({ error: 'Indexer not ready' });
@@ -167,17 +297,32 @@ app.get('/api/analytics/dashboard', (req, res) => {
   res.json(analytics);
 });
 
-// Search GRs
+// Search GRs - FIXED to handle various query formats
 app.post('/api/search', (req, res) => {
   if (!indexer) {
     return res.status(503).json({ error: 'Indexer not ready' });
   }
 
-  const results = indexer.search(req.body);
-  res.json({
-    count: results.length,
-    results: results.slice(0, 50),
-  });
+  try {
+    const query = req.body || {};
+    // Ensure query has proper format
+    const searchParams = {
+      keyword: query.keyword || query.query || '',
+      department: query.department || '',
+      district: query.district || '',
+      yearFrom: query.yearFrom || '',
+      yearTo: query.yearTo || ''
+    };
+    
+    const results = indexer.search(searchParams);
+    res.json({
+      count: results.length,
+      results: results.slice(0, 50),
+    });
+  } catch (error) {
+    console.error('Search error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Get departments
@@ -200,7 +345,7 @@ app.get('/api/districts', (req, res) => {
   res.json({ districts });
 });
 
-// Real-time field verification route
+// Real-time field verification
 app.post('/api/gr/verify-fields', (req, res) => {
   const { fieldName, fieldValue, department } = req.body;
   if (!verifier) {
@@ -213,7 +358,11 @@ app.post('/api/gr/verify-fields', (req, res) => {
 // Generate new GR
 app.post('/api/gr/generate', async (req, res) => {
   if (!generator) {
-    return res.status(503).json({ error: 'Generator not ready - API key not configured' });
+    return res.status(503).json({ 
+      error: 'Generator not ready',
+      details: 'No API key configured or initialization failed.',
+      solution: 'Set GEMINI_API_KEY in /backend/.env file'
+    });
   }
 
   try {
@@ -223,43 +372,151 @@ app.post('/api/gr/generate', async (req, res) => {
       // Save to database
       await saveGR(result.draft, req.body.userId || 'system');
 
-      // Run verification
-      const verification = verifier.verify(result.draft);
-      await saveAlerts(result.draft.id, verification.alerts);
+      let verification = null;
+      let combinedConflictAudit = result.draft.conflict_audit || null;
+
+      // Get the original conflicts from the draft
+      const originalConflicts = result.draft.conflict_audit || { conflicted_grs: [], has_conflict: false };
+      
+      console.log('\n📊 === ORIGINAL CONFLICTS FROM DRAFT ===');
+      console.log('Has Conflict:', originalConflicts.has_conflict);
+      console.log('Conflicts Count:', originalConflicts.conflicted_grs?.length || 0);
+      console.log('========================================\n');
+
+      if (verifier) {
+        try {
+          verification = await verifier.verify(result.draft);
+          
+          // Get verification alerts
+          const verifierAlerts = verification.alerts || [];
+          const verifierConflicts = verifierAlerts.filter(a => a.category === 'conflict');
+          
+          // Get original conflicts
+          const originalConflictGRs = originalConflicts.conflicted_grs || [];
+          
+          // COMBINE: Take conflicts from BOTH sources
+          const combinedConflicts = [];
+          
+          // Add original conflicts
+          originalConflictGRs.forEach(c => {
+            combinedConflicts.push({
+              grNumber: c.grNumber || c.sourceGrId,
+              department: c.department || 'Unknown',
+              reason: c.reason || c.conflict_details || 'Policy conflict detected',
+              severity: c.severity || 'HIGH',
+              sourceGrId: c.grNumber || c.sourceGrId,
+              linkUrl: c.linkUrl || `/api/gr/${encodeURIComponent(c.grNumber || '')}`
+            });
+          });
+          
+          // Add verifier conflicts (avoid duplicates)
+          const existingIds = new Set(combinedConflicts.map(c => c.grNumber).filter(Boolean));
+          verifierConflicts.forEach(c => {
+            if (!existingIds.has(c.sourceGrId)) {
+              combinedConflicts.push({
+                grNumber: c.sourceGrId || 'UNKNOWN',
+                department: c.sourceDepartment || 'Unknown',
+                reason: c.description || c.title || 'Verification conflict detected',
+                severity: c.severity?.toUpperCase() || 'HIGH',
+                sourceGrId: c.sourceGrId,
+                linkUrl: c.linkUrl || `/api/gr/${encodeURIComponent(c.sourceGrId || '')}`
+              });
+            }
+          });
+          
+          // Determine severity
+          let maxSeverity = 'NONE';
+          combinedConflicts.forEach(c => {
+            const sev = c.severity?.toUpperCase() || 'NONE';
+            const levels = { 'NONE': 0, 'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4 };
+            if (levels[sev] > levels[maxSeverity]) maxSeverity = sev;
+          });
+          
+          combinedConflictAudit = {
+            has_conflict: combinedConflicts.length > 0 || originalConflicts.has_conflict,
+            severity: maxSeverity,
+            conflicted_grs: combinedConflicts,
+            conflict_details: combinedConflicts.map(c => `${c.reason} (Ref: ${c.grNumber})`).join(' | ')
+          };
+          
+          console.log('\n🔍 === COMBINED CONFLICT AUDIT ===');
+          console.log('Has Conflict:', combinedConflictAudit.has_conflict);
+          console.log('Severity:', combinedConflictAudit.severity);
+          console.log('Conflicts Count:', combinedConflictAudit.conflicted_grs.length);
+          combinedConflictAudit.conflicted_grs.forEach((c, i) => {
+            console.log(`  ${i+1}. ${c.severity}: ${c.reason.substring(0, 80)}...`);
+          });
+          console.log('================================\n');
+          
+        } catch (verifyErr) {
+          console.warn('Verification failed but continuing:', verifyErr.message);
+          // Use original conflicts if verification fails
+          combinedConflictAudit = originalConflicts;
+        }
+      }
+
+      // Update the draft with combined conflicts
+      result.draft.conflict_audit = combinedConflictAudit;
+
+      // ALSO update the verification object to include the conflicts
+      if (verification) {
+        verification.conflict_audit = combinedConflictAudit;
+        // Add conflicts to alerts if they're not already there
+        if (combinedConflictAudit.conflicted_grs) {
+          const existingAlertIds = new Set(verification.alerts.map(a => a.sourceGrId).filter(Boolean));
+          combinedConflictAudit.conflicted_grs.forEach(c => {
+            if (!existingAlertIds.has(c.sourceGrId)) {
+              verification.alerts.push({
+                severity: c.severity?.toLowerCase() || 'high',
+                category: 'conflict',
+                title: `🚨 ${c.severity || 'Policy'}: ${c.department || 'Unknown'}`,
+                description: c.reason || 'Policy conflict detected',
+                evidence: `Source: ${c.grNumber || 'Unknown'}`,
+                remediationSuggestion: `Review references or mandates in ${c.grNumber} and coordinate across departments if necessary.`,
+                sourceGrId: c.grNumber || c.sourceGrId,
+                sourceDepartment: c.department,
+                linkUrl: c.linkUrl || `/api/gr/${encodeURIComponent(c.grNumber || '')}`
+              });
+            }
+          });
+        }
+      }
 
       res.json({
         success: true,
         grId: result.grId,
         draft: result.draft,
-        verification,
+        verification: verification,
         tokensUsed: result.tokensUsed,
+        apiUsed: generator.config?.type || 'fallback',
+        // Explicitly include combined conflict_audit at top level
+        conflict_audit: combinedConflictAudit
       });
     } else {
       res.status(400).json({
         success: false,
-        error: result.error,
+        error: result.error || 'Generation failed'
       });
     }
   } catch (error) {
+    console.error('GR Generation error:', error);
     res.status(500).json({
-      error: error.message,
+      error: 'Failed to generate GR',
+      details: error.message
     });
   }
 });
-
 // Save GR draft
 app.post('/api/gr/save', async (req, res) => {
   try {
     const gr = req.body;
     const userId = req.body.userId || 'system';
 
-    // Save to database
     await saveGR(gr, userId);
 
-    // Re-verify the updated GR and save new alerts!
     let verification = null;
     if (verifier) {
-      verification = verifier.verify(gr);
+      verification = await verifier.verify(gr);
       await saveAlerts(gr.id, verification.alerts);
     }
 
@@ -277,7 +534,7 @@ app.post('/api/gr/save', async (req, res) => {
 app.post('/api/gr/auto-resolve', async (req, res) => {
   const { gr, alert } = req.body;
   const geminiKey = process.env.GEMINI_API_KEY;
-  const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  const geminiModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 
   if (!gr || !alert) {
     return res.status(400).json({ error: 'Missing gr or alert details' });
@@ -312,9 +569,8 @@ ${JSON.stringify(gr.sections?.financials || [])}
 ${JSON.stringify(gr.sections?.distribution || [])}
 
 YOUR TASK:
-Fix the issues identified in the alert by adjusting/editing only the relevant sections (e.g., if there is a conflict in the resolution text, fix the resolution text. If it is a deprecated account head, update the financials account head. If it is a missing reference, insert a logical reference).
-Keep all other sections completely unchanged.
-You must return your output in JSON format with the keys:
+Fix the issues identified in the alert by adjusting/editing only the relevant sections.
+Return your output in JSON format with the keys:
 {
   "sections": {
     "header": "updated header or unchanged",
@@ -325,29 +581,40 @@ You must return your output in JSON format with the keys:
     "distribution": [updated distribution array or unchanged]
   }
 }
-Do not include any extra dialogue or text outside of the JSON block. Return ONLY raw JSON.`;
+Return ONLY raw JSON.`;
 
   try {
     let responseText = '';
+    let apiUsed = 'fallback';
+    
     if (geminiKey) {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            temperature: 0.1
+      const validation = validateApiKey(geminiKey, 'gemini');
+      if (validation.valid) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                responseMimeType: "application/json",
+                temperature: 0.1
+              }
+            })
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            responseText = data.candidates[0].content.parts[0].text;
+            apiUsed = 'gemini';
+          } else {
+            console.error("Gemini resolve failed:", response.status);
           }
-        })
-      });
-      if (response.ok) {
-        const data = await response.json();
-        responseText = data.candidates[0].content.parts[0].text;
-      } else {
-        console.error("Gemini resolve failed:", response.status, await response.text());
+        } catch (apiError) {
+          console.error("Gemini API call error:", apiError.message);
+        }
       }
     }
 
@@ -358,12 +625,12 @@ Do not include any extra dialogue or text outside of the JSON block. Return ONLY
         const parsed = JSON.parse(cleanJson);
         updatedSections = parsed.sections || parsed;
       } catch (e) {
-        console.error("Failed to parse resolved sections:", e, responseText);
+        console.error("Failed to parse resolved sections:", e.message);
       }
     }
 
     if (!updatedSections) {
-      // Mock local fallback resolve if no key or parsing fails
+      console.log("Using local fallback for auto-resolve");
       updatedSections = { ...gr.sections };
       if (alert.category === 'deprecated' && alert.conflictingPhrase) {
         if (updatedSections.financials) {
@@ -385,44 +652,44 @@ Do not include any extra dialogue or text outside of the JSON block. Return ONLY
       }
     };
 
-    // Re-save to database
     await saveGR(updatedGr, gr.userId || 'system');
 
-    // Re-verify the updated GR and save alerts
     let verification = null;
     if (verifier) {
-      verification = verifier.verify(updatedGr);
+      verification = await verifier.verify(updatedGr);
       await saveAlerts(updatedGr.id, verification.alerts);
     }
 
     res.json({
       success: true,
       gr: updatedGr,
-      verification
+      verification,
+      apiUsed: apiUsed
     });
   } catch (error) {
     console.error("Auto resolve error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Auto-resolve failed, but you can manually fix the issues'
+    });
   }
 });
 
 // Helper to find GR by ID or GR Number
 async function findGRByIdOrNumber(grId) {
-  // 1. Check in-memory indexer FIRST (extremely fast, handles 99% of historical lookups)
   if (indexer) {
     let gr = indexer.getGRById(grId);
     if (gr) return gr;
     
-    const indexedId = indexer.indices.byGRNumber?.get(grId);
+    const indexedId = indexer.indices?.byGRNumber?.get(grId);
     if (indexedId) {
       gr = indexer.getGRById(indexedId);
       if (gr) return gr;
     }
 
-    // O(1) hash lookup via normalized GR Number / ID (resolves in <1 microsecond)
     const normId = grId.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (normId) {
-      const normalizedMatchId = indexer.indices.byGRNumberNormalized?.get(normId);
+      const normalizedMatchId = indexer.indices?.byGRNumberNormalized?.get(normId);
       if (normalizedMatchId) {
         gr = indexer.getGRById(normalizedMatchId);
         if (gr) return gr;
@@ -430,18 +697,14 @@ async function findGRByIdOrNumber(grId) {
     }
   }
 
-  // 2. Check SQLite database by ID
   let gr = await getGR(grId);
   if (gr) return gr;
   
-  // 3. Fallback: Check SQLite database by GR number
   if (!gr) {
     try {
       const db_instance = await initDB();
-      // First exact search
       let row = await db_instance.get('SELECT id FROM grs WHERE gr_number = ?', [grId]);
       if (!row) {
-        // Fuzzy two-way LIKE search (handles prefixes like 'No. ...')
         row = await db_instance.get(
           'SELECT id FROM grs WHERE ? LIKE "%" || gr_number || "%" OR gr_number LIKE "%" || ? || "%"',
           [grId, grId]
@@ -451,289 +714,12 @@ async function findGRByIdOrNumber(grId) {
         gr = await getGR(row.id);
       }
     } catch (e) {
-      console.error('Database query in findGRByIdOrNumber failed:', e);
+      console.error('Database query failed:', e);
     }
   }
   
   return gr;
 }
-
-// Export GR as HTML
-app.get('/api/gr/:grId/export/html', async (req, res) => {
-  try {
-    const gr = await findGRByIdOrNumber(req.params.grId);
-
-    if (!gr) {
-      return res.status(404).send('<h1>Government Resolution Not Found</h1>');
-    }
-
-    const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Government Resolution: ${gr.metadata?.grNumber || 'Draft'}</title>
-  <style>
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      line-height: 1.6;
-      color: #000;
-      margin: 40px;
-      background-color: #fff;
-    }
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-      border: 1px solid #ccc;
-      padding: 50px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    }
-    .header {
-      text-align: center;
-      margin-bottom: 30px;
-      border-bottom: 2px double #000;
-      padding-bottom: 20px;
-    }
-    .emblem {
-      font-size: 50px;
-      margin-bottom: 10px;
-    }
-    .header h1 {
-      font-size: 22px;
-      text-transform: uppercase;
-      margin: 5px 0;
-      letter-spacing: 1px;
-    }
-    .header h2 {
-      font-size: 18px;
-      margin: 5px 0;
-      font-weight: normal;
-    }
-    .meta-table {
-      width: 100%;
-      margin-bottom: 30px;
-      border-collapse: collapse;
-    }
-    .meta-table td {
-      padding: 5px;
-      vertical-align: top;
-    }
-    .meta-label {
-      font-weight: bold;
-      width: 150px;
-    }
-    .section-title {
-      font-size: 16px;
-      font-weight: bold;
-      text-transform: uppercase;
-      margin-top: 25px;
-      margin-bottom: 10px;
-      border-bottom: 1px solid #000;
-      padding-bottom: 3px;
-    }
-    .introduction {
-      text-align: justify;
-      margin-bottom: 20px;
-      text-indent: 50px;
-    }
-    .references-list, .distribution-list {
-      padding-left: 20px;
-      margin-bottom: 20px;
-    }
-    .references-list li, .distribution-list li {
-      margin-bottom: 8px;
-    }
-    .resolution-clause {
-      text-align: justify;
-      margin-bottom: 15px;
-      text-indent: 30px;
-    }
-    .financial-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 20px 0;
-    }
-    .financial-table th, .financial-table td {
-      border: 1px solid #000;
-      padding: 8px;
-      text-align: left;
-    }
-    .financial-table th {
-      background-color: #f2f2f2;
-    }
-    .financial-table td.amount {
-      text-align: right;
-    }
-    .signature-block {
-      margin-top: 50px;
-      float: right;
-      text-align: center;
-      width: 250px;
-    }
-    .signature-line {
-      border-top: 1px solid #000;
-      margin-top: 50px;
-      padding-top: 5px;
-    }
-    .seal {
-      border: 2px solid #a00;
-      color: #a00;
-      padding: 10px;
-      display: inline-block;
-      border-radius: 50%;
-      text-transform: uppercase;
-      font-size: 10px;
-      font-weight: bold;
-      transform: rotate(-10deg);
-      margin-top: 20px;
-    }
-    .print-btn-container {
-      max-width: 800px;
-      margin: 20px auto;
-      text-align: right;
-    }
-    .print-btn {
-      background-color: #1a3a52;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      font-size: 14px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-weight: bold;
-    }
-    .print-btn:hover {
-      background-color: #ff9933;
-    }
-    @media print {
-      .print-btn-container {
-        display: none;
-      }
-      body {
-        margin: 0;
-      }
-      .container {
-        border: none;
-        box-shadow: none;
-        padding: 0;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="print-btn-container">
-    <button class="print-btn" onclick="window.print()">Print Resolution (PDF)</button>
-  </div>
-
-  <div class="container">
-    <div class="header">
-      <div style="display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 12px;">
-        <img src="/emblem_india_maharashtra.png" style="height: 65px; object-fit: contain;" alt="Government of Maharashtra Emblem" />
-        <img src="/maharashtra_rajmudra_seal.png" style="height: 65px; object-fit: contain;" alt="Maharashtra Rajmudra Seal" />
-      </div>
-      <h1>Government of Maharashtra</h1>
-      <h2>${gr.department || 'Department of Administration'}</h2>
-      <h2>Mantralaya, Mumbai - 400032</h2>
-    </div>
-
-    <table class="meta-table">
-      <tr>
-        <td class="meta-label">Resolution No:</td>
-        <td><strong>${gr.metadata?.grNumber || 'Draft / Unassigned'}</strong></td>
-      </tr>
-      <tr>
-        <td class="meta-label">Date:</td>
-        <td>${gr.metadata?.date || new Date().toLocaleDateString('en-IN')}</td>
-      </tr>
-      <tr>
-        <td class="meta-label">Subject:</td>
-        <td><strong>${gr.metadata?.subject}</strong></td>
-      </tr>
-      ${gr.metadata?.intentType ? `
-      <tr>
-        <td class="meta-label">Intent Type:</td>
-        <td>${gr.metadata.intentType}</td>
-      </tr>` : ''}
-      ${gr.districts && gr.districts.length > 0 ? `
-      <tr>
-        <td class="meta-label">Districts:</td>
-        <td>${gr.districts.join(', ')}</td>
-      </tr>` : ''}
-    </table>
-
-    ${gr.sections.introduction ? `
-    <div class="section-title">Introduction</div>
-    <div class="introduction">
-      ${gr.sections.introduction}
-    </div>` : ''}
-
-
-    <div class="section-title">Government Resolution</div>
-    <div class="resolution-body">
-      ${gr.sections.resolutions && gr.sections.resolutions.length > 0 ? 
-        gr.sections.resolutions.map(clause => `
-          <div class="resolution-clause">
-            ${clause.index}. ${clause.text}
-          </div>
-        `).join('') : `
-          <div class="resolution-clause">
-            ${gr.sections.resolution || 'The government hereby resolves to approve the proposals.'}
-          </div>
-        `
-      }
-    </div>
-
-    ${gr.sections.financials && gr.sections.financials.length > 0 ? `
-    <div class="section-title">Financial Allocations</div>
-    <table class="financial-table">
-      <thead>
-        <tr>
-          <th>Description</th>
-          <th>Account Head</th>
-          <th style="text-align: right;">Amount (₹)</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${gr.sections.financials.map(fin => `
-          <tr>
-            <td>${fin.description || 'Budget allocation'}</td>
-            <td><code>${fin.accountHead || 'N/A'}</code></td>
-            <td class="amount"><strong>${fin.amount ? fin.amount.toLocaleString('en-IN') : 'N/A'}</strong></td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>` : ''}
-
-    ${gr.sections.distribution && gr.sections.distribution.length > 0 ? `
-    <div class="section-title">Distribution</div>
-    <ol class="distribution-list">
-      ${gr.sections.distribution.map(dist => `
-        <li>${dist.recipient}</li>
-      `).join('')}
-    </ol>` : ''}
-
-    <div style="clear: both;"></div>
-
-    <div class="signature-block">
-      <div class="seal">Govt of Maharashtra</div>
-      <div class="signature-line">
-        <strong>Authorized Signatory</strong><br>
-        Department of ${gr.department || 'Administration'}<br>
-        Government of Maharashtra
-      </div>
-    </div>
-    
-    <div style="clear: both;"></div>
-  </div>
-</body>
-</html>
-    `;
-
-    res.send(html);
-  } catch (error) {
-    res.status(500).send(`<h1>Error generating export: ${error.message}</h1>`);
-  }
-});
 
 // Get GR
 app.get('/api/gr/:grId', async (req, res) => {
@@ -744,13 +730,12 @@ app.get('/api/gr/:grId', async (req, res) => {
       return res.status(404).json({ error: 'GR not found' });
     }
 
-    // Dynamically read raw text file if it exists in the filesystem
     if (gr.filename && fs.existsSync(gr.filename)) {
       try {
         gr.sections = gr.sections || {};
         gr.sections.fullText = fs.readFileSync(gr.filename, 'utf8');
       } catch (readErr) {
-        console.error(`Failed to read full text file ${gr.filename}:`, readErr);
+        console.error(`Failed to read file:`, readErr);
       }
     }
 
@@ -759,10 +744,10 @@ app.get('/api/gr/:grId', async (req, res) => {
     let checksRun = [];
     if (verifier && gr.status === 'draft') {
       try {
-        const verification = verifier.verify(gr);
+        const verification = await verifier.verify(gr);
         checksRun = verification.checksRun;
       } catch (verifyErr) {
-        console.warn(`Verifier skipped for historical GR ${gr.id}:`, verifyErr.message);
+        console.warn(`Verifier skipped:`, verifyErr.message);
       }
     }
 
@@ -776,14 +761,14 @@ app.get('/api/gr/:grId', async (req, res) => {
   }
 });
 
-// Verify GR (dry-run for instant reactive checks)
+// Verify GR (dry-run)
 app.post('/api/gr/verify-dryrun', async (req, res) => {
   if (!verifier) {
     return res.status(503).json({ error: 'Verifier not ready' });
   }
   try {
     const gr = req.body;
-    const verification = verifier.verify(gr);
+    const verification = await verifier.verify(gr);
     res.json(verification);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -803,18 +788,19 @@ app.post('/api/gr/:grId/verify', async (req, res) => {
       return res.status(404).json({ error: 'GR not found' });
     }
 
-    const verification = verifier.verify(gr);
-
-    // Save alerts
+    const verification = await verifier.verify(gr);
     await saveAlerts(gr.id, verification.alerts);
 
-    res.json(verification);
+    res.json({
+      verification,
+      checksRun: verification.checksRun
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get alerts for GR
+// Get alerts
 app.get('/api/gr/:grId/alerts', async (req, res) => {
   try {
     const alerts = await getAlerts(req.params.grId);
@@ -856,14 +842,14 @@ app.post('/api/gr/:grId/approve', async (req, res) => {
   }
 });
 
-// Reject GR / Request Changes
+// Reject GR
 app.post('/api/gr/:grId/reject', async (req, res) => {
   try {
     const grId = req.params.grId;
     const userId = req.body.userId || 'system';
     const reason = req.body.reason || 'Revision required.';
     const role = req.body.role || '';
-    const actionType = req.body.actionType || 'request_changes'; // 'request_changes' or 'reject'
+    const actionType = req.body.actionType || 'request_changes';
 
     let rejectedBy = 'senior_officer';
     if (role.toLowerCase() === 'minister' || userId.toLowerCase().includes('minister')) {
@@ -899,7 +885,7 @@ app.post('/api/gr/:grId/reject', async (req, res) => {
   }
 });
 
-// AI Policy Search Assistant Chatbot Endpoint (98,000+ GR Knowledge Base)
+// AI Assistant Chat
 app.post('/api/assistant/chat', async (req, res) => {
   try {
     const { query } = req.body;
@@ -922,12 +908,12 @@ app.post('/api/assistant/chat', async (req, res) => {
       matchingGRs: result.matchingGRs
     });
   } catch (error) {
-    console.error('Error in AI Assistant chat endpoint:', error);
+    console.error('Error in AI Assistant:', error);
     res.status(500).json({ error: 'Failed to process AI assistant search: ' + error.message });
   }
 });
 
-// Get policy evolution
+// Policy evolution
 app.get('/api/policy-evolution/:keyword', (req, res) => {
   if (!indexer) {
     return res.status(503).json({ error: 'Indexer not ready' });
@@ -937,7 +923,7 @@ app.get('/api/policy-evolution/:keyword', (req, res) => {
   res.json({ evolution });
 });
 
-// Get similar GRs
+// Similar GRs
 app.post('/api/similar-grs', (req, res) => {
   if (!indexer) {
     return res.status(503).json({ error: 'Indexer not ready' });
@@ -952,7 +938,7 @@ app.post('/api/similar-grs', (req, res) => {
   });
 });
 
-// Official HTML / Printable Document Export
+// Export HTML
 app.get('/api/gr/:grId/export/html', async (req, res) => {
   try {
     const grId = req.params.grId;
@@ -1034,10 +1020,10 @@ app.get('/api/gr/:grId/export/html', async (req, res) => {
 
     <div class="section-title">शासकीय निर्णय (Resolution Clauses)</div>
     <ul class="clause-list">
-      ${clausesMarathi.map(c => `<li class="clause-item">${c}</li>`).join('')}
+      ${Array.isArray(clausesMarathi) ? clausesMarathi.map(c => `<li class="clause-item">${c}</li>`).join('') : ''}
     </ul>
 
-    ${clausesEnglish.length > 0 ? `
+    ${Array.isArray(clausesEnglish) && clausesEnglish.length > 0 ? `
       <div style="margin-top: 15px; font-weight: 600; color: #475569; font-size: 13px;">English Translation of Clauses:</div>
       <ul class="clause-list" style="color: #334155; font-style: italic;">
         ${clausesEnglish.map(c => `<li class="clause-item">${c}</li>`).join('')}
@@ -1056,11 +1042,11 @@ app.get('/api/gr/:grId/export/html', async (req, res) => {
       <pre style="font-family: inherit; font-size: 13px; white-space: pre-wrap; background: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 4px;">${distText}</pre>
     ` : ''}
 
-    ${historicalRefs.length > 0 ? `
+    ${Array.isArray(historicalRefs) && historicalRefs.length > 0 ? `
       <div class="footer-links">
         <strong>📋 अस्सल संदर्भ ऐतिहासिक शासन निर्णय (Historical Reference GRs Cited by AI):</strong>
         <ul style="margin: 5px 0 0 0; padding-left: 20px;">
-          ${historicalRefs.map(r => `<li><a class="ref-link" href="${r.linkUrl}" target="_blank">${r.grNumber} - ${r.subject} (${r.department})</a></li>`).join('')}
+          ${historicalRefs.map(r => `<li><a class="ref-link" href="${r.linkUrl || '#'}" target="_blank">${r.grNumber || 'N/A'} - ${r.subject || ''} (${r.department || ''})</a></li>`).join('')}
         </ul>
       </div>
     ` : ''}
@@ -1101,6 +1087,8 @@ async function startServer() {
     app.listen(PORT, () => {
       console.log(`\n🎉 Server running on http://localhost:${PORT}`);
       console.log(`📊 Dashboard: http://localhost:5173`);
+      console.log(`🔑 API Status: http://localhost:${PORT}/api/status`);
+      console.log(`📁 Health Check: http://localhost:${PORT}/health`);
     });
   } else {
     console.error('❌ Failed to initialize backend');
