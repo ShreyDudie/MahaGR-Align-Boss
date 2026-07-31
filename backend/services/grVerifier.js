@@ -10,8 +10,21 @@ export class GRVerifier {
   /**
    * Verify a generated GR draft
    */
-  verify(draftGR) {
+  async verify(draftGR) {
     this.alerts = [];
+
+    // Sync edited raw resolution string to resolutions array for verifications
+    if (draftGR.sections && typeof draftGR.sections.resolution === 'string') {
+      const cleanText = draftGR.sections.resolution.trim();
+      const clauses = cleanText.split(/\n+/).map(c => c.trim()).filter(c => c.length > 5);
+      draftGR.sections.resolutions = clauses.map((text, idx) => ({
+        text,
+        index: idx + 1
+      }));
+    }
+
+    // Extract references from draft text first
+    this._extractReferencesFromDraft(draftGR);
 
     // Run basic verification checks
     this._checkDeprecatedAccountHeads(draftGR);
@@ -22,6 +35,15 @@ export class GRVerifier {
     this._checkFinancialOverrun(draftGR);
     this._checkTemporalConflicts(draftGR);
     this._checkPolicyKnowledgeBaseConflicts(draftGR);
+    this._checkMissingReferences(draftGR);
+    this._checkTemplateCompliance(draftGR);
+
+    // Run semantic conflict detection
+    try {
+      await this._checkSemanticConflicts(draftGR);
+    } catch (semErr) {
+      console.error('Semantic conflict detection failed:', semErr.message);
+    }
 
     // Assign unique IDs to each alert if missing
     this.alerts = this.alerts.map((a, idx) => ({
@@ -48,7 +70,8 @@ export class GRVerifier {
         { id: 'reference', name: "Missing References Check", description: "Ensures the document correctly cites necessary precursor GRs.", passed: !hasCategory('reference') },
         { id: 'terminology', name: "Terminology Consistency Check", description: "Scans for deprecated, outdated, or inconsistent officer names/titles.", passed: !hasCategory('terminology') },
         { id: 'jurisdiction', name: "District Jurisdiction Check", description: "Checks if selected districts are within the department's active zones.", passed: !hasCategory('jurisdiction') },
-        { id: 'temporal', name: "Temporal Overlap Check", description: "Checks if an identical resolution has been published within the last 30 days.", passed: !hasCategory('temporal') }
+        { id: 'temporal', name: "Temporal Overlap Check", description: "Checks if an identical resolution has been published within the last 30 days.", passed: !hasCategory('temporal') },
+        { id: 'template', name: "Template Compliance Check", description: "Enforces structure defined in Maharashtra Manual of Office Procedure.", passed: !hasCategory('template') }
       ]
     };
   }
@@ -136,7 +159,7 @@ export class GRVerifier {
    * Check for policy conflicts with existing GRs
    */
   _checkPolicyConflicts(draftGR) {
-    if (!draftGR.metadata.subject) return;
+    if (!draftGR.metadata || !draftGR.metadata.subject) return;
 
     // Find GRs on same topic from same department
     const similar = this.indexer.findSimilar(draftGR, 10);
@@ -157,6 +180,7 @@ export class GRVerifier {
           evidence: `Existing GR: ${similarGR.metadata.subject}`,
           remediationSuggestion: 'Review resolution mandates to ensure consistency with prior policies.',
           sourceGrId: similarGR.id,
+          autoResolvable: true,
         });
       }
     });
@@ -191,34 +215,234 @@ export class GRVerifier {
   }
 
   /**
-   * Check for missing or invalid references
+   * Extract cited GRs, circulars, and court orders from draft preamble/read section/inputs
+   */
+  _extractReferencesFromDraft(draftGR) {
+    const references = [];
+    const seenText = new Set();
+
+    const textSources = [
+      draftGR.sections?.read_section_text,
+      draftGR.sections?.introduction,
+      draftGR.sections?.preamble_marathi,
+      draftGR.sections?.preamble_english,
+      draftGR.inputPayload?.reference_document,
+      draftGR.inputPayload?.original_gr_id
+    ];
+
+    const fullText = textSources
+      .filter(Boolean)
+      .map(t => String(t))
+      .join('\n');
+
+    // 1. Extract 21-digit GR IDs (e.g. 201803171122508601)
+    const grIdRegex = /\b(20[0-2]\d{11,18})\b/g;
+    let match;
+    while ((match = grIdRegex.exec(fullText)) !== null) {
+      const id = match[1];
+      if (!seenText.has(id)) {
+        seenText.add(id);
+        references.push({
+          type: 'gr',
+          grNumber: id,
+          date: null,
+          sourceText: match[0]
+        });
+      }
+    }
+
+    const stopWords = /\s+(?:and|or|pursuant|with|read|dated|of|from|to|for|is|are|in|on|at|by|under|here)\b/i;
+
+    // 2. Extract GRs (e.g. "Government Resolution No. PLN-2026/CR-45" or "GR No. Asank-1004/...")
+    // Support optional department name e.g. "Government Resolution, Finance Department, No. ..."
+    const grRegex = /(?:Government\s+Resolution|GR|Resolution)(?:,\s*[A-Za-z\s,&]+Department,?)?\s+(?:No\.?|Number|No:)?\s*([A-Za-z0-9\-\/\.\(\)#_]{2,80}(?:\s+[A-Za-z0-9\-\/\.\(\)#_]{1,40}){0,6})/gi;
+    grRegex.lastIndex = 0;
+    while ((match = grRegex.exec(fullText)) !== null) {
+      const sourceText = match[0].trim();
+      let grNumber = match[1].trim();
+
+      // Clean up trailing punctuation
+      grNumber = grNumber.replace(/[\.,;\s]+$/, '').trim();
+
+      // Truncate stop words
+      const stopMatch = grNumber.match(stopWords);
+      if (stopMatch) {
+        grNumber = grNumber.substring(0, stopMatch.index).trim();
+      }
+
+      // Check if it contains digits to avoid matching plain words
+      if (grNumber.length > 3 && /\d/.test(grNumber) && !seenText.has(sourceText) && !seenText.has(grNumber)) {
+        const postText = fullText.substring(match.index + sourceText.length, match.index + sourceText.length + 50);
+        const dateMatch = postText.match(/(?:dated|of|from|dt\.|d\.)\s*(\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}\b|\b\d{1,2}\s+[A-Za-z]+\s+\d{4}\b)/i);
+        const date = dateMatch ? dateMatch[1].trim() : null;
+
+        seenText.add(sourceText);
+        seenText.add(grNumber);
+        references.push({
+          type: 'gr',
+          grNumber: grNumber,
+          date: date,
+          sourceText: sourceText + (dateMatch ? ' ' + dateMatch[0] : '')
+        });
+      }
+    }
+
+    // 3. Extract Circulars
+    const circularRegex = /(?:Government\s+Circular|Circular)(?:,\s*[A-Za-z\s,&]+Department,?)?\s+(?:No\.?|Number|No:)?\s*([A-Za-z0-9\-\/\.\(\)#_]{2,80}(?:\s+[A-Za-z0-9\-\/\.\(\)#_]{1,40}){0,6})/gi;
+    circularRegex.lastIndex = 0;
+    while ((match = circularRegex.exec(fullText)) !== null) {
+      const sourceText = match[0].trim();
+      let circularNumber = match[1].trim();
+
+      circularNumber = circularNumber.replace(/[\.,;\s]+$/, '').trim();
+
+      const stopMatch = circularNumber.match(stopWords);
+      if (stopMatch) {
+        circularNumber = circularNumber.substring(0, stopMatch.index).trim();
+      }
+
+      if (circularNumber.length > 3 && /\d/.test(circularNumber) && !seenText.has(sourceText) && !seenText.has(circularNumber)) {
+        const postText = fullText.substring(match.index + sourceText.length, match.index + sourceText.length + 50);
+        const dateMatch = postText.match(/(?:dated|of|from|dt\.|d\.)\s*(\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}\b|\b\d{1,2}\s+[A-Za-z]+\s+\d{4}\b)/i);
+        const date = dateMatch ? dateMatch[1].trim() : null;
+
+        seenText.add(sourceText);
+        seenText.add(circularNumber);
+        references.push({
+          type: 'circular',
+          grNumber: circularNumber,
+          date: date,
+          sourceText: sourceText + (dateMatch ? ' ' + dateMatch[0] : '')
+        });
+      }
+    }
+
+    // 4. Extract Court Orders
+    const courtOrderRegex = /\b(?:Writ\s+Petition|W\.P\.|WP|ULP|ULP\s+Complaint|Civil\s+Appeal|Special\s+Leave\s+Petition|SLP|Original\s+Application|O\.A\.|OA)\s+(?:\(Civil\)\s+)?(?:No\.?|Number|No:)?\s*([A-Za-z0-9\-\/\.\(\)#_]{1,80}(?:\s+[A-Za-z0-9\-\/\.\(\)#_]{1,40}){0,6})/gi;
+    courtOrderRegex.lastIndex = 0;
+    while ((match = courtOrderRegex.exec(fullText)) !== null) {
+      const sourceText = match[0].trim();
+      let orderNumber = match[1].trim();
+
+      orderNumber = orderNumber.replace(/[\.,;\s]+$/, '').trim();
+
+      const stopMatch = orderNumber.match(stopWords);
+      if (stopMatch) {
+        orderNumber = orderNumber.substring(0, stopMatch.index).trim();
+      }
+
+      if (orderNumber.length > 0 && /\d/.test(orderNumber) && !seenText.has(sourceText) && !seenText.has(orderNumber)) {
+        const postText = fullText.substring(match.index + sourceText.length, match.index + sourceText.length + 50);
+        const dateMatch = postText.match(/(?:dated|of|from|dt\.|d\.)\s*(\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}\b|\b\d{1,2}\s+[A-Za-z]+\s+\d{4}\b)/i);
+        const date = dateMatch ? dateMatch[1].trim() : null;
+
+        seenText.add(sourceText);
+        seenText.add(orderNumber);
+        references.push({
+          type: 'court_order',
+          grNumber: orderNumber,
+          date: date,
+          sourceText: sourceText + (dateMatch ? ' ' + dateMatch[0] : '')
+        });
+      }
+    }
+
+    draftGR.sections.references = references;
+  }
+
+  /**
+   * Check for missing or invalid references (verify against 98k indexer)
    */
   _checkMissingReferences(draftGR) {
-    if (!draftGR.sections.references || draftGR.sections.references.length === 0) {
-      this.alerts.push({
-        severity: 'medium',
-        category: 'reference',
-        title: 'No references to prior GRs',
-        description: 'This GR does not reference any prior resolutions. Most GRs reference earlier policies.',
-        conflictingPhrase: null,
-        remediationSuggestion: 'Add references to relevant prior GRs if this supersedes or relates to existing policies.',
-        sourceGrId: null,
-      });
-    } else {
-      // Check if referenced GRs exist in database
+    if (draftGR.sections.references && draftGR.sections.references.length > 0) {
       draftGR.sections.references.forEach(ref => {
         if (ref.grNumber) {
-          const found = this.indexer.indices.byGRNumber?.has(ref.grNumber);
+          const cleanRefNum = ref.grNumber.trim();
+          const cleanNormRef = cleanRefNum.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+          let found = false;
+          let sourceGrId = null;
+
+          if (this.indexer) {
+            // 1. Try direct get by ID
+            let doc = this.indexer.getGRById(cleanRefNum);
+            if (doc) {
+              found = true;
+              sourceGrId = doc.id;
+            }
+
+            // 2. Try normalized ID/GR Number lookup
+            if (!found && cleanNormRef) {
+              const matchedId = this.indexer.indices.byGRNumberNormalized?.get(cleanNormRef);
+              if (matchedId) {
+                found = true;
+                sourceGrId = matchedId;
+              }
+            }
+
+            // 3. Try direct byGRNumber map lookup
+            if (!found) {
+              const matchedId = this.indexer.indices.byGRNumber?.get(cleanRefNum);
+              if (matchedId) {
+                found = true;
+                sourceGrId = matchedId;
+              }
+            }
+
+            // 4. Try matching normalized substring in ID
+            if (!found && cleanNormRef) {
+              const matchingGr = this.indexer.grs.find(gr => {
+                const normId = gr.id.toLowerCase().replace(/[^a-z0-9]/g, '');
+                return normId.includes(cleanNormRef);
+              });
+              if (matchingGr) {
+                found = true;
+                sourceGrId = matchingGr.id;
+              }
+            }
+
+            // 5. Try fuzzy codeNumber search
+            if (!found) {
+              const searchHits = this.indexer.search({ codeNumber: cleanRefNum });
+              if (searchHits.length > 0) {
+                found = true;
+                sourceGrId = searchHits[0].id;
+              }
+            }
+
+            // 6. For Court Orders / Circulars: scan for presence in any of the 98,000 documents
+            if (!found && (ref.type === 'court_order' || ref.type === 'circular')) {
+              const searchStr = cleanNormRef;
+              if (searchStr.length >= 3) {
+                const matchingGr = this.indexer.grs.find(gr => {
+                  const fullText = (gr.metadata?.subject || '') + ' ' + 
+                                   (gr.sections?.read_section_text || '') + ' ' + 
+                                   (gr.sections?.introduction || '') + ' ' +
+                                   (gr.sections?.resolutions?.map(r => r.text).join(' ') || '');
+                  const normFullText = fullText.toLowerCase().replace(/[^a-z0-9]/g, '');
+                  return normFullText.includes(searchStr);
+                });
+                if (matchingGr) {
+                  found = true;
+                  sourceGrId = matchingGr.id;
+                }
+              }
+            }
+          }
+
           if (!found) {
+            const typeLabel = ref.type === 'circular' ? 'Circular' : (ref.type === 'court_order' ? 'Court Order' : 'GR');
             this.alerts.push({
               severity: 'low',
               category: 'reference',
-              title: `Referenced GR may not exist: ${ref.grNumber}`,
-              description: `GR number ${ref.grNumber} was referenced but not found in the database. Verify the reference is correct.`,
+              title: `Referenced ${typeLabel} may not exist: ${ref.grNumber}`,
+              description: `${typeLabel} reference "${ref.grNumber}" was cited but not found in the official archive database. Verify if the reference is correct.`,
               conflictingPhrase: ref.grNumber,
-              remediationSuggestion: 'Correct the GR number or verify the reference is valid.',
+              remediationSuggestion: `Correct the ${typeLabel} details, check the spelling/numbers, or verify the reference is valid.`,
               sourceGrId: null,
             });
+          } else if (sourceGrId) {
+            ref.sourceGrId = sourceGrId;
           }
         }
       });
@@ -235,7 +459,7 @@ export class GRVerifier {
       'Revenue Officer': 'Tahsildar',
     };
 
-    let text = (draftGR.metadata.subject || '') + ' ' + (draftGR.sections.resolutions?.map(r => r.text).join(' ') || '');
+    let text = (draftGR.metadata?.subject || '') + ' ' + (draftGR.sections.resolutions?.map(r => r.text).join(' ') || '');
 
     Object.entries(outdatedTerms).forEach(([outdated, current]) => {
       if (text.includes(outdated)) {
@@ -255,8 +479,70 @@ export class GRVerifier {
             conflictingPhrase: outdated,
             remediationSuggestion: `Replace "${outdated}" with "${current}" for consistency.`,
             sourceGrId: null,
+            autoResolvable: true,
           });
         }
+      }
+    });
+
+    // Bilingual Department Glossary Mismatch Check
+    const glossary = {
+      'Finance Department': 'वित्त विभाग',
+      'Public Health Department': 'सार्वजनिक आरोग्य विभाग',
+      'School Education and Sports Department': 'शालेय शिक्षण व क्रीडा विभाग',
+      'Agriculture Department': 'कृषी विभाग',
+      'Home Department': 'गृह विभाग',
+      'Housing Department': 'गृहनिर्माण विभाग'
+    };
+
+    const currentDept = draftGR.department || '';
+    const marathiText = (draftGR.sections.introduction || '') + ' ' + (draftGR.sections.preamble_marathi || '') + ' ' + (draftGR.sections.resolution || '');
+
+    Object.entries(glossary).forEach(([engDept, marDept]) => {
+      if (currentDept.toLowerCase().trim() === engDept.toLowerCase().trim()) {
+        Object.entries(glossary).forEach(([otherEng, otherMar]) => {
+          if (otherEng !== engDept && marathiText.includes(otherMar)) {
+            this.alerts.push({
+              severity: 'medium',
+              category: 'terminology',
+              title: `Bilingual Term Mismatch: ${otherMar}`,
+              description: `Draft department is '${engDept}', but the Marathi text cites '${otherMar}' (associated with '${otherEng}').`,
+              conflictingPhrase: otherMar,
+              remediationSuggestion: `Verify if '${otherMar}' is correct or align it with the '${engDept}' ('${marDept}').`,
+              autoResolvable: true,
+            });
+          }
+        });
+      }
+    });
+
+    // Controlled Bilingual Legal Glossary Validation (FR-7, FR-8, FR-9)
+    const legalGlossary = [
+      { english: 'sanction', marathi: 'मंजुरी', approved: ['मंजुरी', 'मंजूर'], unapproved: ['परवानगी', 'मंजूरा'] },
+      { english: 'expenditure', marathi: 'खर्च', approved: ['खर्च', 'व्यय'], unapproved: ['खर्चा'] },
+      { english: 'corrigendum', marathi: 'शुद्धीपत्रक', approved: ['शुद्धीपत्रक'], unapproved: ['दुरुस्ती पत्रक', 'दुरुस्तीपत्रक'] },
+      { english: 'moratorium', marathi: 'स्थगिती', approved: ['स्थगिती'], unapproved: ['बंदी'] },
+      { english: 'resolution', marathi: 'शासन निर्णय', approved: ['शासन निर्णय', 'शासननिर्णय'], unapproved: ['सरकारी निर्णय'] },
+      { english: 'appoint', marathi: 'नियुक्ती', approved: ['नियुक्ती', 'नेमणूक'], unapproved: ['भरती'] }
+    ];
+
+    legalGlossary.forEach(item => {
+      // Check if English term or unapproved Marathi terms are present in the GR text
+      const hasEnglish = text.toLowerCase().includes(item.english);
+      if (hasEnglish) {
+        item.unapproved.forEach(unapp => {
+          if (marathiText.includes(unapp)) {
+            this.alerts.push({
+              severity: 'low',
+              category: 'terminology',
+              title: `Unapproved terminology: "${unapp}"`,
+              description: `The unapproved Marathi term "${unapp}" was found. For standard administrative English term "${item.english}", the approved translation is "${item.marathi}".`,
+              conflictingPhrase: unapp,
+              remediationSuggestion: `Replace "${unapp}" with the approved standard term "${item.marathi}".`,
+              autoResolvable: true,
+            });
+          }
+        });
       }
     });
   }
@@ -338,7 +624,7 @@ export class GRVerifier {
    * Check for temporal conflicts (same policy issued twice in overlapping timeframes)
    */
   _checkTemporalConflicts(draftGR) {
-    if (!draftGR.metadata.date) return;
+    if (!draftGR.metadata || !draftGR.metadata.date) return;
 
     const similar = this.indexer.findSimilar(draftGR, 10);
     const draftDate = new Date(draftGR.metadata.date.split('-').reverse().join('-'));
@@ -349,13 +635,13 @@ export class GRVerifier {
         // Check if issued within 30 days
         const daysDiff = Math.abs((draftDate - similarDate) / (1000 * 60 * 60 * 24));
 
-        if (daysDiff < 30 && draftGR.metadata.subject === similarGR.metadata.subject) {
+        if (daysDiff < 30 && draftGR.metadata?.subject === similarGR.metadata?.subject) {
           this.alerts.push({
             severity: 'medium',
             category: 'temporal',
             title: 'Similar GR issued recently',
             description: `A similar GR was issued ${daysDiff.toFixed(0)} days ago. Verify this is not a duplicate.`,
-            conflictingPhrase: draftGR.metadata.subject,
+            conflictingPhrase: draftGR.metadata?.subject || '',
             evidence: `Previous GR: ${similarGR.metadata.grNumber} on ${similarGR.metadata.date}`,
             remediationSuggestion: 'Review if this is an amendment or a new policy.',
             sourceGrId: similarGR.id,
@@ -398,6 +684,7 @@ export class GRVerifier {
           conflictingPhrase: draftGR.metadata?.subject || '',
           remediationSuggestion: `Review references or mandates in ${c.grNumber} and coordinate across departments if necessary.`,
           sourceGrId: c.grNumber, // Links to precursor GR
+          autoResolvable: true,
         });
       });
     }
@@ -453,6 +740,387 @@ export class GRVerifier {
 
     return { valid: true, status: 'verified', message: '✅ Valid input' };
   }
+
+  /**
+   * Verify GR structure compliance with Maharashtra Manual of Office Procedure
+   */
+  _checkTemplateCompliance(draftGR) {
+    if (!draftGR.sections) return;
+
+    // 1. Check Preamble / Introduction
+    if (!draftGR.sections.introduction || draftGR.sections.introduction.trim().length < 10) {
+      this.alerts.push({
+        severity: 'critical',
+        category: 'template',
+        title: 'Missing Preamble/Introduction',
+        description: 'The GR must contain an Introduction/Preamble introducing the background of the resolution.',
+        conflictingPhrase: null,
+        remediationSuggestion: 'Add an introduction or preamble describing the context and background.'
+      });
+    }
+
+    // 2. Check Reference (Read) Section (Disabled)
+
+    // 3. Check Resolution Section
+    if (!draftGR.sections.resolution || draftGR.sections.resolution.trim().length < 10) {
+      if (!draftGR.sections.resolutions || draftGR.sections.resolutions.length === 0) {
+        this.alerts.push({
+          severity: 'critical',
+          category: 'template',
+          title: 'Missing Resolution Mandates',
+          description: 'The GR must contain a "Resolution" (शासन निर्णय) section detailing the official executive orders.',
+          conflictingPhrase: null,
+          remediationSuggestion: 'Add resolution clauses outlining the government orders.'
+        });
+      }
+    }
+
+    // 4. Check Financial Sanction Block (for Financial GRs)
+    if (draftGR.metadata?.intentType === '1_FINANCIAL_SANCTION' || draftGR.gr_type === '1_FINANCIAL_SANCTION') {
+      if (!draftGR.sections.financials || draftGR.sections.financials.length === 0) {
+        this.alerts.push({
+          severity: 'critical',
+          category: 'template',
+          title: 'Missing Financial Sanction Block',
+          description: 'Financial Sanction GRs must contain a Financial Sanction Block specifying the sanctioned amount, account head, and DDO.',
+          conflictingPhrase: null,
+          remediationSuggestion: 'Provide the budget details including amount, budget head, and drawing/disbursing officer.'
+        });
+      } else {
+        // Validate Budget Head format (e.g. 2054-00-101-02 or 15-digit code)
+        draftGR.sections.financials.forEach(fin => {
+          if (!fin.accountHead) {
+            this.alerts.push({
+              severity: 'critical',
+              category: 'template',
+              title: 'Missing Budget Head',
+              description: 'Financial allocation is missing a Budget Account Head.',
+              conflictingPhrase: null,
+              remediationSuggestion: 'Specify the 15-digit or 4-digit Budget Account Head (e.g., 2054-00-101-01-01).'
+            });
+          } else {
+            const cleanHead = fin.accountHead.trim();
+            const isValidFormat = /^\d{4}-\d{2}-\d{3}-\d{2}-\d{2}$/.test(cleanHead) || /^\d{4}/.test(cleanHead) || /^\d{15}$/.test(cleanHead);
+            if (!isValidFormat) {
+              this.alerts.push({
+                severity: 'critical',
+                category: 'template',
+                title: 'Incorrect Budget Head Format',
+                description: `Budget head "${fin.accountHead}" does not follow standard formats (e.g. 2054-00-101-02-01 or 15-digit numeric).`,
+                conflictingPhrase: fin.accountHead,
+                remediationSuggestion: 'Correct the budget head format to match: XXXX-XX-XXX-XX-XX.'
+              });
+            }
+          }
+        });
+      }
+    }
+
+    // 5. Check Signature Headers
+    if (!draftGR.sections.signature || draftGR.sections.signature.trim().length < 10) {
+      this.alerts.push({
+        severity: 'critical',
+        category: 'template',
+        title: 'Missing Signature block',
+        description: 'The GR must contain an official Signature Block declaring the signing authority and Governor name.',
+        conflictingPhrase: null,
+        remediationSuggestion: 'Add the signature details, e.g., "By order and in the name of the Governor of Maharashtra".'
+      });
+    } else {
+      const sigText = draftGR.sections.signature.toLowerCase();
+      const hasGovernorName = sigText.includes('governor') || sigText.includes('राज्यपाल') || sigText.includes('order and in the name');
+      if (!hasGovernorName) {
+        this.alerts.push({
+          severity: 'high',
+          category: 'template',
+          title: 'Incorrect Signature Header format',
+          description: 'The signature block does not cite the Governor of Maharashtra as the executive sanctioning authority.',
+          conflictingPhrase: draftGR.sections.signature.substring(0, 100),
+          remediationSuggestion: 'Include: "By order and in the name of the Governor of Maharashtra" in the signature block.'
+        });
+      }
+    }
+  }
+
+  /**
+   * Check resolutions for semantic conflicts against GRs from other departments
+   */
+  async _checkSemanticConflicts(draftGR) {
+    if (!draftGR.sections?.resolutions || draftGR.sections.resolutions.length === 0) {
+      return;
+    }
+
+    const SEMANTIC_IGNORE_WORDS = new Set([
+      'department', 'departments', 'under', 'scheme', 'schemes', 'finance', 'financial', 'government', 'resolution', 'resolutions',
+      'dated', 'approved', 'crore', 'crores', 'lakh', 'lakhs', 'rupees', 'state', 'office', 'offices', 'officer', 'officers',
+      'commissioner', 'administrative', 'approval', 'current', 'year', 'decision', 'policy', 'budget', 'grant', 'grants',
+      'assistance', 'fund', 'funds', 'implementation', 'implement', 'subject', 'preamble', 'introduction', 'section', 'hereby',
+      'thereto', 'pursuant', 'direction', 'directions', 'annexure', 'schedule', 'table', 'number', 'circular', 'order',
+      'court', 'court_order', 'petition', 'appeal', 'the', 'and', 'with', 'from', 'for', 'about'
+    ]);
+
+    const currentDept = (draftGR.department || '').trim();
+    const geminiKey = process.env.GEMINI_API_KEY;
+    const allDetectedConflicts = [];
+
+    // Process each clause in the draft
+    for (const clause of draftGR.sections.resolutions) {
+      const clauseText = clause.text || '';
+      if (clauseText.trim().length < 15) continue;
+
+      // Extract search keywords from indexer, filter out very common words
+      let searchTerms = '';
+      if (this.indexer && typeof this.indexer._extractKeywords === 'function') {
+        const rawKeywords = this.indexer._extractKeywords(clauseText);
+        searchTerms = rawKeywords
+          .filter(w => !SEMANTIC_IGNORE_WORDS.has(w.toLowerCase()))
+          .slice(0, 5)
+          .join(' ');
+      } else {
+        searchTerms = clauseText.split(/\W+/)
+          .filter(w => w.length > 3 && !SEMANTIC_IGNORE_WORDS.has(w.toLowerCase()))
+          .slice(0, 5)
+          .join(' ');
+      }
+
+      if (!searchTerms) continue;
+
+      // Query indexer for matching candidate documents
+      const candidates = this.indexer.search({ keyword: searchTerms });
+      
+      // Filter out candidates belonging to the current department
+      const crossDeptCandidates = candidates.filter(c => 
+        c.department && c.department.toLowerCase().trim() !== currentDept.toLowerCase().trim()
+      ).slice(0, 50);
+
+      if (crossDeptCandidates.length === 0) continue;
+
+      // Extract clauses from cross-department candidate documents
+      const candidateClauses = [];
+      crossDeptCandidates.forEach(gr => {
+        if (gr.sections?.resolutions) {
+          gr.sections.resolutions.forEach(c => {
+            if (c.text && c.text.trim().length > 15) {
+              candidateClauses.push({
+                grId: gr.id,
+                grNumber: gr.metadata?.grNumber || gr.id,
+                department: gr.department,
+                text: c.text
+              });
+            }
+          });
+        }
+      });
+
+      if (candidateClauses.length === 0) continue;
+
+      let similarities = [];
+
+      if (geminiKey) {
+        // Option A: Dense vector embeddings from Gemini API
+        try {
+          const textsToEmbed = [clauseText, ...candidateClauses.map(cc => cc.text)];
+          
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key=${geminiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              requests: textsToEmbed.map(text => ({
+                model: 'models/text-embedding-004',
+                content: { parts: [{ text }] }
+              }))
+            })
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            const embeddings = data.embeddings || [];
+            if (embeddings.length >= 2) {
+              const draftVector = embeddings[0].values;
+              
+              for (let i = 0; i < candidateClauses.length; i++) {
+                const candidateVector = embeddings[i + 1]?.values;
+                if (candidateVector) {
+                  const score = this._cosineSimilarity(draftVector, candidateVector);
+                  similarities.push({
+                    candidate: candidateClauses[i],
+                    draftText: clauseText,
+                    score: score
+                  });
+                }
+              }
+            }
+          } else {
+            console.warn('Gemini embedding request failed, falling back to local TF-IDF:', response.status);
+            similarities = this._computeLocalTfidfSimilarities(clauseText, candidateClauses);
+          }
+        } catch (apiErr) {
+          console.warn('Gemini embedding error, falling back to local TF-IDF:', apiErr.message);
+          similarities = this._computeLocalTfidfSimilarities(clauseText, candidateClauses);
+        }
+      } else {
+        // Option B: Sparse vector TF-IDF embeddings (Fallback)
+        similarities = this._computeLocalTfidfSimilarities(clauseText, candidateClauses);
+      }
+
+      allDetectedConflicts.push(...similarities);
+    }
+
+    // Sort detected conflicts by similarity score descending
+    allDetectedConflicts.sort((a, b) => b.score - a.score);
+
+    // Capture the top 3 overall conflicts above the 70% threshold
+    const similarityThreshold = 0.70;
+    const topConflicts = allDetectedConflicts
+      .filter(conflict => conflict.score >= similarityThreshold)
+      .slice(0, 3);
+
+    topConflicts.forEach(conf => {
+      const scorePercent = (conf.score * 100).toFixed(0);
+      this.alerts.push({
+        severity: 'high',
+        category: 'conflict',
+        title: `Semantic Conflict (${scorePercent}% similarity)`,
+        description: `Draft clause overlaps with existing policy in '${conf.candidate.department}' (GR ID: ${conf.candidate.grNumber}).`,
+        conflictingPhrase: conf.draftText.substring(0, 100) + (conf.draftText.length > 100 ? '...' : ''),
+        evidence: `Conflicting sentence in ${conf.candidate.grNumber}: "${conf.matchedSentence || conf.candidate.text}"`,
+        remediationSuggestion: `Align or coordinate this mandate with ${conf.candidate.department}'s policy to prevent overlap or contradictions.`,
+        sourceGrId: conf.candidate.grId,
+        autoResolvable: true,
+      });
+    });
+  }
+
+  _cosineSimilarity(vecA, vecB) {
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+      dotProduct += vecA[i] * vecB[i];
+      normA += vecA[i] * vecA[i];
+      normB += vecB[i] * vecB[i];
+    }
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  }
+
+  _computeLocalTfidfSimilarities(draftText, candidateClauses) {
+    const vectorizer = new LocalTfidfVectorizer();
+    
+    // Split each candidate clause into sentences and keep track of parent clause
+    const sentenceCandidates = [];
+    candidateClauses.forEach(cc => {
+      const sentences = cc.text.split(/[.।\n\r]+/).map(s => s.trim()).filter(s => s.length > 15);
+      sentences.forEach(s => {
+        sentenceCandidates.push({
+          parentClause: cc,
+          text: s
+        });
+      });
+    });
+
+    if (sentenceCandidates.length === 0) return [];
+
+    const texts = [draftText, ...sentenceCandidates.map(sc => sc.text)];
+    
+    try {
+      const vectors = vectorizer.fitAndTransform(texts);
+      const draftVector = vectors[0];
+      const similarities = [];
+
+      for (let i = 0; i < sentenceCandidates.length; i++) {
+        const candidateVector = vectors[i + 1];
+        const score = this._cosineSimilarity(draftVector, candidateVector);
+        similarities.push({
+          sentenceCandidate: sentenceCandidates[i],
+          score: score
+        });
+      }
+
+      // Group back by parent clause and take the maximum score
+      const clauseScoreMap = new Map();
+      similarities.forEach(sim => {
+        const key = sim.sentenceCandidate.parentClause;
+        const currentMax = clauseScoreMap.get(key) || { score: -1, text: '' };
+        if (sim.score > currentMax.score) {
+          clauseScoreMap.set(key, { score: sim.score, text: sim.sentenceCandidate.text });
+        }
+      });
+
+      const finalSimilarities = [];
+      clauseScoreMap.forEach((val, candidate) => {
+        finalSimilarities.push({
+          candidate: candidate,
+          draftText: draftText,
+          score: val.score,
+          matchedSentence: val.text
+        });
+      });
+
+      return finalSimilarities;
+    } catch (err) {
+      console.error('Local TF-IDF similarity calculation failed:', err.message);
+      return [];
+    }
+  }
+}
+
+/**
+ * High-speed local TF-IDF Vector space model
+ */
+class LocalTfidfVectorizer {
+  constructor() {
+    this.vocabulary = new Map();
+    this.idf = [];
+    this.docs = [];
+  }
+
+  fitAndTransform(documents) {
+    this.docs = documents.map(doc => doc.toLowerCase().split(/\W+/).filter(w => w.length > 2));
+    const termDocCounts = new Map();
+    this.docs.forEach(tokens => {
+      const uniqueTokens = new Set(tokens);
+      uniqueTokens.forEach(token => {
+        termDocCounts.set(token, (termDocCounts.get(token) || 0) + 1);
+      });
+    });
+
+    let index = 0;
+    termDocCounts.forEach((count, term) => {
+      this.vocabulary.set(term, index);
+      this.idf[index] = Math.log(documents.length / (1 + count));
+      index++;
+    });
+
+    return this.docs.map(tokens => {
+      const vector = new Array(this.vocabulary.size).fill(0);
+      const tf = new Map();
+      tokens.forEach(t => tf.set(t, (tf.get(t) || 0) + 1));
+      tf.forEach((count, term) => {
+        const vocabIndex = this.vocabulary.get(term);
+        if (vocabIndex !== undefined) {
+          vector[vocabIndex] = (count / tokens.length) * this.idf[vocabIndex];
+        }
+      });
+      return vector;
+    });
+  }
+
+  transform(document) {
+    const tokens = document.toLowerCase().split(/\W+/).filter(w => w.length > 2);
+    const vector = new Array(this.vocabulary.size).fill(0);
+    const tf = new Map();
+    tokens.forEach(t => tf.set(t, (tf.get(t) || 0) + 1));
+    tf.forEach((count, term) => {
+      const vocabIndex = this.vocabulary.get(term);
+      if (vocabIndex !== undefined) {
+        vector[vocabIndex] = (count / tokens.length) * this.idf[vocabIndex];
+      }
+    });
+    return vector;
+  }
 }
 
 export default GRVerifier;
+export { LocalTfidfVectorizer };
+

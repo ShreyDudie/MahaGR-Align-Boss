@@ -16,15 +16,34 @@ export default function Dashboard({ user, setCurrentGR }) {
   const [grList, setGrList] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  // Search state
+  // Search state matching the official layout
   const [searchParams, setSearchParams] = useState({
     keyword: '',
     department: '',
+    fromDate: '',
+    byDate: '',
+    codeNumber: '',
+    captchaInput: '',
   });
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [searchTriggered, setSearchTriggered] = useState(false);
   const [departmentsList, setDepartmentsList] = useState([]);
+  const [captchaCode, setCaptchaCode] = useState('');
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageInput, setPageInput] = useState('1');
+  const itemsPerPage = 10;
+
+  const generateCaptcha = () => {
+    const chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars[Math.floor(Math.random() * chars.length)];
+    }
+    setCaptchaCode(code);
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -57,6 +76,7 @@ export default function Dashboard({ user, setCurrentGR }) {
 
   useEffect(() => {
     fetchDashboardData();
+    generateCaptcha();
   }, [user]);
 
   const handleEditDraft = (gr) => {
@@ -74,15 +94,20 @@ export default function Dashboard({ user, setCurrentGR }) {
   };
 
   const handleSearchSubmit = async (e) => {
-    e.preventDefault();
-    if (!searchParams.keyword && !searchParams.department) {
-      alert('Please enter a keyword or select a department to search');
-      return;
-    }
+    if (e && e.preventDefault) e.preventDefault();
+
     setSearching(true);
     setSearchTriggered(true);
+    setCurrentPage(1);
+
     try {
-      const response = await axios.post('http://localhost:5000/api/search', searchParams);
+      const response = await axios.post('http://localhost:5000/api/search', {
+        keyword: searchParams.keyword,
+        department: searchParams.department,
+        fromDate: '',
+        byDate: '',
+        codeNumber: ''
+      });
       setSearchResults(response.data.results || []);
     } catch (error) {
       console.error('Search failed:', error);
@@ -93,9 +118,37 @@ export default function Dashboard({ user, setCurrentGR }) {
   };
 
   const handleClearSearch = () => {
-    setSearchParams({ keyword: '', department: '' });
+    setSearchParams({
+      keyword: '',
+      department: '',
+      fromDate: '',
+      byDate: '',
+      codeNumber: '',
+      captchaInput: '',
+    });
     setSearchResults([]);
     setSearchTriggered(false);
+    setCurrentPage(1);
+  };
+
+  // Pagination calculations
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedResults = searchResults.slice(startIndex, startIndex + itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(searchResults.length / itemsPerPage));
+
+  useEffect(() => {
+    setPageInput(currentPage.toString());
+  }, [currentPage]);
+
+  const handlePageGo = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const parsedPage = parseInt(pageInput, 10);
+    if (!isNaN(parsedPage) && parsedPage >= 1 && parsedPage <= totalPages) {
+      setCurrentPage(parsedPage);
+    } else {
+      alert(`Please enter a valid page number between 1 and ${totalPages}`);
+      setPageInput(currentPage.toString());
+    }
   };
 
   if (loading) {
@@ -192,97 +245,164 @@ export default function Dashboard({ user, setCurrentGR }) {
       </div>
 
       {/* Historical GR Search Section */}
-      <div className="quick-actions" style={{ background: '#fcfcfc', border: '1px solid #1a3a52' }}>
-        <h3 style={{ color: '#1a3a52', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
-          🔍 Search Historical Resolution Database ({stats.totalHistoricalGRs.toLocaleString()} GRs)
+      <div className="simple-search-card">
+        <h3 className="simple-search-title">
+          🔍 Search Historical Resolution Database (98,980 GRs)
         </h3>
-        <form onSubmit={handleSearchSubmit} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '12px' }}>
-          <div>
-            <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px', color: '#1a3a52' }}>Keyword / Topic</label>
-            <input
-              type="text"
-              name="keyword"
-              placeholder="e.g., scheme, budget, grant, solar"
-              value={searchParams.keyword}
-              onChange={handleSearchChange}
-              style={{ width: '100%', padding: '8px', border: '2px solid #1a3a52', borderRadius: '4px', backgroundColor: '#ffffff', color: '#111111', fontWeight: '600', boxSizing: 'border-box' }}
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px', color: '#1a3a52' }}>Department</label>
-            <select
-              name="department"
-              value={searchParams.department}
-              onChange={handleSearchChange}
-              style={{ width: '100%', padding: '8px', border: '2px solid #1a3a52', borderRadius: '4px', backgroundColor: '#ffffff', color: '#111111', fontWeight: '600', boxSizing: 'border-box' }}
-            >
-              <option value="">All Departments</option>
-              {departmentsList.map(dept => (
-                <option key={dept} value={dept}>{dept.replace(/_/g, ' ')}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
-            <button type="submit" className="action-btn primary" style={{ width: '100%', justifyContent: 'center' }} disabled={searching}>
+
+        <form onSubmit={handleSearchSubmit}>
+          <div className="simple-search-row">
+            <div className="simple-search-field">
+              <label>Keyword / Topic</label>
+              <input
+                type="text"
+                name="keyword"
+                value={searchParams.keyword}
+                onChange={handleSearchChange}
+                placeholder="e.g., scheme, budget, grant, policy"
+              />
+            </div>
+            
+            <div className="simple-search-field">
+              <label>Department</label>
+              <select
+                name="department"
+                value={searchParams.department}
+                onChange={handleSearchChange}
+              >
+                <option value="">All Departments</option>
+                {departmentsList.map(dept => (
+                  <option key={dept} value={dept}>{dept.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+            </div>
+
+            <button type="submit" className="simple-search-btn" disabled={searching}>
               {searching ? 'Searching...' : 'Search'}
             </button>
-            {searchTriggered && (
-              <button type="button" className="action-btn secondary" onClick={handleClearSearch} style={{ padding: '10px' }}>
-                Clear
-              </button>
-            )}
           </div>
         </form>
+      </div>
 
         {/* Search Results */}
         {searchTriggered && (
-          <div style={{ marginTop: '20px', background: 'white', padding: '16px', borderRadius: '4px', border: '1px solid #ddd' }}>
-            <h4 style={{ color: '#1a3a52', marginBottom: '12px' }}>Search Results ({searchResults.length} matches found)</h4>
+          <div className="search-results-wrapper">
+            <div className="search-results-info-bar">
+              <div className="total-items-badge">
+                Total items : {searchResults.length}
+              </div>
+              
+              <form onSubmit={handlePageGo} className="page-go-form">
+                <span>Page No. : </span>
+                <input
+                  type="text"
+                  value={pageInput}
+                  onChange={(e) => setPageInput(e.target.value)}
+                  className="page-no-input"
+                />
+                <span> / {totalPages} </span>
+                <button type="submit" className="go-btn">Go</button>
+              </form>
+
+              {/* Render Pagination Links */}
+              <div className="pagination-links-container">
+                {currentPage > 1 && (
+                  <span className="page-link-num" onClick={() => setCurrentPage(1)}>&lt;&lt; First</span>
+                )}
+                {Array.from({ length: totalPages }).map((_, idx) => {
+                  const pNum = idx + 1;
+                  // Show current page, and up to 2 pages around it
+                  if (pNum === 1 || pNum === totalPages || Math.abs(pNum - currentPage) <= 2) {
+                    return (
+                      <span 
+                        key={pNum} 
+                        className={`page-link-num ${pNum === currentPage ? 'active' : ''}`}
+                        onClick={() => setCurrentPage(pNum)}
+                      >
+                        {pNum}
+                      </span>
+                    );
+                  }
+                  if (pNum === 2 || pNum === totalPages - 1) {
+                    return <span key={pNum} className="page-link-ellipse">...</span>;
+                  }
+                  return null;
+                }).filter((el, idx, self) => {
+                  // filter out duplicate ellipses
+                  if (el && el.type === 'span' && el.props.className === 'page-link-ellipse') {
+                    const nextEl = self[idx + 1];
+                    if (nextEl && nextEl.type === 'span' && nextEl.props.className === 'page-link-ellipse') {
+                      return false;
+                    }
+                  }
+                  return true;
+                })}
+                {currentPage < totalPages && (
+                  <span className="page-link-num" onClick={() => setCurrentPage(currentPage + 1)}>Next &gt;</span>
+                )}
+                {currentPage < totalPages && (
+                  <span className="page-link-num" onClick={() => setCurrentPage(totalPages)}>Last &gt;&gt;</span>
+                )}
+              </div>
+            </div>
+
             {searchResults.length === 0 ? (
-              <p style={{ color: '#777', fontStyle: 'italic' }}>No matching resolutions found in the historical database.</p>
+              <p className="no-results-msg">No matching resolutions found in the historical database.</p>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+              <div className="results-table-container">
+                <table className="official-results-table">
                   <thead>
-                    <tr style={{ borderBottom: '2px solid #eee', color: '#1a3a52', background: '#f5f5f5' }}>
-                      <th style={{ padding: '10px 8px' }}>Subject / Date</th>
-                      <th style={{ padding: '10px 8px' }}>Department</th>
-                      <th style={{ padding: '10px 8px' }}>Resolution ID</th>
-                      <th style={{ padding: '10px 8px' }}>Reference Link</th>
+                    <tr>
+                      <th style={{ width: '6%' }}>Number</th>
+                      <th style={{ width: '22%' }}>Department name</th>
+                      <th style={{ width: '38%' }}>Title</th>
+                      <th style={{ width: '14%' }}>Code number</th>
+                      <th style={{ width: '10%' }}>G.R. dated</th>
+                      <th style={{ width: '5%' }}>Size (KB)</th>
+                      <th style={{ width: '5%' }}>Download</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {searchResults.map(result => (
-                      <tr key={result.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                        <td style={{ padding: '10px 8px' }}>
-                          <div><strong>{result.metadata?.subject}</strong></div>
-                          <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>Date: {result.metadata?.date || 'N/A'}</div>
-                        </td>
-                        <td style={{ padding: '10px 8px', color: '#555' }}>{result.department?.replace(/_/g, ' ')}</td>
-                        <td style={{ padding: '10px 8px' }}>
-                          <span style={{ display: 'inline-block', background: '#e1f5fe', color: '#0288d1', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                            {result.id}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 8px' }}>
-                          <a 
-                            href={`http://localhost:5000/api/gr/${result.id}/export/html`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ color: '#ff9933', fontWeight: 'bold', textDecoration: 'underline', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          >
-                            <span>📄</span> View Official GR
-                          </a>
-                        </td>
-                      </tr>
-                    ))}
+                    {paginatedResults.map((result, idx) => {
+                      const cleanCodeNumber = result.id ? result.id.split('.')[0] : 'N/A';
+                      const sizeKb = result.sections ? Math.round(JSON.stringify(result).length / 1024) || 120 : 120;
+                      return (
+                        <tr key={result.id}>
+                          <td style={{ textAlign: 'center' }}>{startIndex + idx + 1}</td>
+                          <td>{result.department ? result.department.replace(/_/g, ' ') : 'N/A'}</td>
+                          <td>
+                            <div className="result-subject-title">{result.metadata?.subject || 'No Subject'}</div>
+                          </td>
+                          <td style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#1a3a52', textAlign: 'center' }}>
+                            {cleanCodeNumber}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {result.metadata?.date || 'N/A'}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {sizeKb}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <a 
+                              href={`http://localhost:5000/api/gr/${result.id}/export/html`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="pdf-download-link"
+                            >
+                              <div className="pdf-icon-badge" title="View Official PDF">
+                                📄
+                              </div>
+                            </a>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
           </div>
         )}
-      </div>
 
       {/* Role-Based Tables */}
       <div className="dashboard-tables" style={{ display: 'grid', gap: '24px', margin: '24px 0' }}>

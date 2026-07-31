@@ -14,7 +14,6 @@ export default function ChatAssistant() {
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedGRModal, setSelectedGRModal] = useState(null);
-  const [loadingModalGR, setLoadingModalGR] = useState(false);
 
   const messagesEndRef = useRef(null);
 
@@ -75,7 +74,6 @@ export default function ChatAssistant() {
 
   const handleOpenGR = async (grId) => {
     if (!grId) return;
-    setLoadingModalGR(true);
     try {
       const res = await axios.get(`http://localhost:5000/api/gr/${encodeURIComponent(grId)}`);
       if (res.data.gr) {
@@ -85,8 +83,6 @@ export default function ChatAssistant() {
       }
     } catch (err) {
       alert(`Error loading GR ${grId}: ` + err.message);
-    } finally {
-      setLoadingModalGR(false);
     }
   };
 
@@ -120,7 +116,7 @@ export default function ChatAssistant() {
           const isBullet = trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.startsWith('* ');
           if (isBullet) {
             // Strip bullet character
-            const cleanContent = trimmed.replace(/^[•\-\*]\s*/, '');
+            const cleanContent = trimmed.replace(/^[•\-*]\s*/, '');
             return (
               <div key={idx} className="chat-bullet-item">
                 <span className="chat-bullet-dot">•</span>

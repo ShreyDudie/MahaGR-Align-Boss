@@ -65,6 +65,11 @@ export class GRIndexer {
         if (normId) {
           this.indices.byGRNumberNormalized.set(normId, gr.id);
         }
+        // Also map the clean numeric part of the ID (e.g., '202101141237329905' from '202101141237329905.pdf.en')
+        const cleanNumericId = gr.id.split('.')[0];
+        if (cleanNumericId && /^\d+$/.test(cleanNumericId)) {
+          this.indices.byGRNumberNormalized.set(cleanNumericId, gr.id);
+        }
       }
 
       // Index by keywords from subject
@@ -124,6 +129,47 @@ export class GRIndexer {
   }
 
   /**
+   * Parse GR date string (DD-Month-YYYY or DD-MM-YYYY or YYYY-MM-DD) into standard Date object
+   */
+  _parseGRDate(dateStr) {
+    if (!dateStr) return null;
+    const clean = dateStr.trim();
+    const parts = clean.split('-');
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      let month = parts[1];
+      const year = parseInt(parts[2], 10);
+      
+      if (!isNaN(day) && !isNaN(year)) {
+        if (isNaN(month)) {
+          const months = {
+            january: 0, jan: 0,
+            february: 1, feb: 1,
+            march: 2, mar: 2,
+            april: 3, apr: 3,
+            may: 4,
+            june: 5, jun: 5,
+            july: 6, jul: 6,
+            august: 7, aug: 7,
+            september: 8, sep: 8,
+            october: 9, oct: 9,
+            november: 10, nov: 10,
+            december: 11, dec: 11
+          };
+          month = months[month.toLowerCase()];
+        } else {
+          month = parseInt(month, 10) - 1;
+        }
+        if (month >= 0 && month <= 11) {
+          return new Date(year, month, day);
+        }
+      }
+    }
+    const parsed = new Date(dateStr);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  /**
    * Get GR by ID
    */
   getGRById(grId) {
@@ -153,6 +199,28 @@ export class GRIndexer {
       results = results.filter(gr => gr.districts && gr.districts.includes(query.district));
     }
 
+    // Filter by From Date (on or after)
+    if (query.fromDate) {
+      const fromDate = new Date(query.fromDate);
+      if (!isNaN(fromDate.getTime())) {
+        results = results.filter(gr => {
+          const grDate = this._parseGRDate(gr.metadata?.date);
+          return grDate ? grDate >= fromDate : false;
+        });
+      }
+    }
+
+    // Filter by By Date (on or before)
+    if (query.byDate) {
+      const byDate = new Date(query.byDate);
+      if (!isNaN(byDate.getTime())) {
+        results = results.filter(gr => {
+          const grDate = this._parseGRDate(gr.metadata?.date);
+          return grDate ? grDate <= byDate : false;
+        });
+      }
+    }
+
     if (query.yearFrom && query.yearTo) {
       const from = parseInt(query.yearFrom);
       const to = parseInt(query.yearTo);
@@ -164,7 +232,19 @@ export class GRIndexer {
       });
     }
 
-    return results.filter(Boolean).slice(0, 50);
+    // Filter by Code number (case-insensitive partial match on ID or GR number)
+    if (query.codeNumber) {
+      const codeClean = query.codeNumber.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (codeClean) {
+        results = results.filter(gr => {
+          const grIdClean = (gr.id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const grNumClean = (gr.metadata?.grNumber || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return grIdClean.includes(codeClean) || grNumClean.includes(codeClean);
+        });
+      }
+    }
+
+    return results.filter(Boolean);
   }
 
   /**

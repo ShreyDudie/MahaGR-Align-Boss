@@ -92,12 +92,48 @@ export default function DraftWorkspace({ currentGR }) {
       if (response.data.success) {
         setProposedChange({
           alertId: alertObj.id,
+          alertTitle: alertObj.title || alertObj.category,
           originalGr: gr,
           updatedGr: response.data.gr,
           verification: response.data.verification
         });
       } else {
         alert('Failed to auto-resolve alert: ' + response.data.error);
+      }
+    } catch (err) {
+      alert('Error auto-resolving: ' + err.message);
+    } finally {
+      setResolvingAlertId(null);
+    }
+  };
+
+  const handleDirectAutoResolve = async (alertObj) => {
+    setResolvingAlertId(alertObj.id);
+    try {
+      const response = await axios.post('http://localhost:5000/api/gr/auto-resolve', {
+        gr,
+        alert: alertObj
+      });
+      if (response.data.success) {
+        const updatedGr = {
+          ...response.data.gr,
+          history: [
+            ...(response.data.gr.history || []),
+            {
+              action: 'AI Suggestion Accepted',
+              actor: user.name,
+              comment: `Auto-resolved conflict: "${alertObj.title || alertObj.category}"`,
+              timestamp: new Date().toISOString()
+            }
+          ]
+        };
+        setGr(updatedGr);
+        setAlerts(response.data.verification?.alerts || []);
+        setChecksRun(response.data.verification?.checksRun || []);
+        setSavedStatus('unsaved');
+        alert(`⚡ Conflict resolved successfully! The conflicting lines have been updated directly.`);
+      } else {
+        alert('Failed to auto-resolve: ' + response.data.error);
       }
     } catch (err) {
       alert('Error auto-resolving: ' + err.message);
@@ -148,7 +184,10 @@ export default function DraftWorkspace({ currentGR }) {
       const delayAutosave = setTimeout(async () => {
         setSavedStatus('saving');
         try {
-          const response = await axios.post('http://localhost:5000/api/gr/save', gr);
+          const response = await axios.post('http://localhost:5000/api/gr/save', {
+            ...gr,
+            userId: user.name
+          });
           setSavedStatus('saved');
           if (response.data.verification) {
             setAlerts(response.data.verification.alerts || []);
@@ -178,7 +217,10 @@ export default function DraftWorkspace({ currentGR }) {
   const handleSave = async () => {
     setSavedStatus('saving');
     try {
-      const response = await axios.post(`http://localhost:5000/api/gr/save`, gr);
+      const response = await axios.post(`http://localhost:5000/api/gr/save`, {
+        ...gr,
+        userId: user.name
+      });
       setSavedStatus('saved');
       if (response.data.verification) {
         setAlerts(response.data.verification.alerts || []);
@@ -319,7 +361,19 @@ export default function DraftWorkspace({ currentGR }) {
               fontWeight: '600',
               fontSize: '11px'
             }} onClick={() => {
-              setGr(proposedChange.updatedGr);
+              const updated = {
+                ...proposedChange.updatedGr,
+                history: [
+                  ...(proposedChange.updatedGr.history || []),
+                  {
+                    action: 'AI Suggestion Accepted',
+                    actor: user.name,
+                    comment: `Applied auto-fix for: "${proposedChange.alertTitle || 'Policy conflict'}"`,
+                    timestamp: new Date().toISOString()
+                  }
+                ]
+              };
+              setGr(updated);
               setAlerts(proposedChange.verification?.alerts || []);
               setChecksRun(proposedChange.verification?.checksRun || []);
               setSavedStatus('unsaved');
@@ -495,22 +549,40 @@ export default function DraftWorkspace({ currentGR }) {
                     
                     <div style={{ display: 'flex', gap: '8px' }}>
                       {alert.autoResolvable && (
-                        <button 
-                          onClick={() => handleAutoResolve(alert)}
-                          disabled={resolvingAlertId === alert.id}
-                          style={{
-                            backgroundColor: '#ff9933',
-                            color: 'white',
-                            border: 'none',
-                            padding: '5px 10px',
-                            borderRadius: '4px',
-                            fontWeight: '600',
-                            fontSize: '12px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {resolvingAlertId === alert.id ? '⏳ Resolving...' : '🔧 Auto-Fix'}
-                        </button>
+                        <>
+                          <button 
+                            onClick={() => handleAutoResolve(alert)}
+                            disabled={resolvingAlertId === alert.id}
+                            style={{
+                              backgroundColor: '#ff9933',
+                              color: 'white',
+                              border: 'none',
+                              padding: '5px 10px',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                              fontSize: '12px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {resolvingAlertId === alert.id ? '⏳ ...' : '🔧 Preview Fix'}
+                          </button>
+                          <button 
+                            onClick={() => handleDirectAutoResolve(alert)}
+                            disabled={resolvingAlertId === alert.id}
+                            style={{
+                              backgroundColor: '#27ae60',
+                              color: 'white',
+                              border: 'none',
+                              padding: '5px 10px',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                              fontSize: '12px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {resolvingAlertId === alert.id ? '⏳ Resolving...' : '⚡ Auto-Resolve'}
+                          </button>
+                        </>
                       )}
                       <button 
                         onClick={() => resolveAlert(alert.id, idx)}
@@ -537,14 +609,36 @@ export default function DraftWorkspace({ currentGR }) {
       )}
 
       <div className="workspace-container">
-        {/* Left: Draft Editor */}
+        {/* Left Outline Column */}
+        <div className="workspace-outline">
+          <div className="outline-title">Outline</div>
+          <button className="outline-item" onClick={() => document.getElementById('sec-header')?.scrollIntoView({ behavior: 'smooth' })}>
+            <span>🏛️</span> Header
+          </button>
+          <button className="outline-item" onClick={() => document.getElementById('sec-introduction')?.scrollIntoView({ behavior: 'smooth' })}>
+            <span>📝</span> Introduction
+          </button>
+          <button className="outline-item" onClick={() => document.getElementById('sec-resolution')?.scrollIntoView({ behavior: 'smooth' })}>
+            <span>⚖️</span> Resolution
+          </button>
+          {gr.gr_type === '1_FINANCIAL_SANCTION' && (
+            <button className="outline-item" onClick={() => document.getElementById('sec-financials')?.scrollIntoView({ behavior: 'smooth' })}>
+              <span>💰</span> Financials
+            </button>
+          )}
+          <button className="outline-item" onClick={() => document.getElementById('sec-signature')?.scrollIntoView({ behavior: 'smooth' })}>
+            <span>✍️</span> Signature
+          </button>
+        </div>
+
+        {/* Center: Draft Editor */}
         <div className="draft-pane">
           <div className="pane-title">
             <h3>📝 Draft Sections (मसुदा विभाग)</h3>
           </div>
 
           {/* Header Section */}
-          <div className="section-card">
+          <div className="section-card" id="sec-header">
             <div className="section-header">
               <h4>Header (शीर्षक)</h4>
               <button className="edit-btn" onClick={() => setEditingSection(editingSection === 'header' ? null : 'header')}>
@@ -555,7 +649,7 @@ export default function DraftWorkspace({ currentGR }) {
           </div>
 
           {/* Introduction Section */}
-          <div className="section-card">
+          <div className="section-card" id="sec-introduction">
             <div className="section-header">
               <h4>Introduction (प्रस्तावना)</h4>
               <button className="edit-btn" onClick={() => setEditingSection(editingSection === 'introduction' ? null : 'introduction')}>
@@ -617,7 +711,7 @@ export default function DraftWorkspace({ currentGR }) {
           </div>
 
           {/* Resolution Section */}
-          <div className="section-card">
+          <div className="section-card" id="sec-resolution">
             <div className="section-header">
               <h4>Resolution (शासन निर्णय)</h4>
               <button className="edit-btn" onClick={() => setEditingSection(editingSection === 'resolution' ? null : 'resolution')}>
@@ -629,7 +723,7 @@ export default function DraftWorkspace({ currentGR }) {
 
           {/* Financials Section */}
           {gr.gr_type === '1_FINANCIAL_SANCTION' && gr.sections.financials && gr.sections.financials.length > 0 && (
-            <div className="section-card">
+            <div className="section-card" id="sec-financials">
               <div className="section-header">
                 <h4>Financial Details (वित्तीय तपशील)</h4>
               </div>
@@ -702,6 +796,42 @@ export default function DraftWorkspace({ currentGR }) {
               </div>
             </div>
           )}
+
+          {/* Signature Block Section */}
+          <div className="section-card" id="sec-signature">
+            <div className="section-header">
+              <h4>Signature Block (स्वाक्षरी ब्लॉक)</h4>
+              <button className="edit-btn" onClick={() => setEditingSection(editingSection === 'signature' ? null : 'signature')}>
+                {editingSection === 'signature' ? '✓' : '✎'}
+              </button>
+            </div>
+            {renderSectionContent('signature', gr.sections.signature || 'By order and in the name of the Governor of Maharashtra,\n\n\n(Authorized Signatory)\nUnder Secretary to Government')}
+            
+            {/* Display drawn signature when not editing */}
+            {editingSection !== 'signature' && gr.sections.signature_image && (
+              <div style={{
+                marginTop: '12px',
+                paddingTop: '12px',
+                borderTop: '1px dashed #e2e8f0',
+                textAlign: 'left'
+              }}>
+                <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                  ✍️ Hand-drawn Signature:
+                </span>
+                <img
+                  src={gr.sections.signature_image}
+                  alt="Drawn Signature"
+                  style={{
+                    maxHeight: '60px',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '6px',
+                    background: '#fff',
+                    padding: '4px'
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right: Alerts Panel */}
@@ -741,7 +871,36 @@ export default function DraftWorkspace({ currentGR }) {
             </div>
           )}
 
-          {/* Verification Alerts Section has been merged into the top warning banner */}
+          {/* Audit Trail & Edit History */}
+          {gr.history && gr.history.length > 0 && (
+            <div className="audit-trail-card" style={{
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
+              borderRadius: '8px',
+              padding: '16px',
+              marginTop: '20px',
+              textAlign: 'left'
+            }}>
+              <h4 style={{ fontSize: '13px', color: '#1a3a52', margin: '0 0 12px 0', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                📜 Audit Trail & Edit Log (सुधारणा इतिहास)
+              </h4>
+              <div className="history-timeline" style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto' }}>
+                {gr.history.map((log, idx) => (
+                  <div key={idx} className="history-log-item" style={{ fontSize: '12px', borderLeft: '2px solid #ff9933', paddingLeft: '8px' }}>
+                    <div style={{ fontWeight: 'bold', color: '#0f172a' }}>{log.action}</div>
+                    <div style={{ color: '#64748b', fontSize: '11px', marginTop: '2px' }}>
+                      By: {log.actor || 'System'} | {new Date(log.timestamp).toLocaleString()}
+                    </div>
+                    {log.comment && (
+                      <div style={{ fontStyle: 'italic', color: '#475569', marginTop: '4px', background: 'rgba(0,0,0,0.02)', padding: '4px 6px', borderRadius: '4px' }}>
+                        "{log.comment}"
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

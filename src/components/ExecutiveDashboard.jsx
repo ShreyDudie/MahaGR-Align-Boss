@@ -8,6 +8,16 @@ export default function ExecutiveDashboard({ user }) {
   const [grs, setGrs] = useState([]);
   const [selectedGR, setSelectedGR] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [signatureImage, setSignatureImage] = useState(null);
+
+  useEffect(() => {
+    setSignatureImage(null);
+    const canvas = document.getElementById('minister-signature-canvas');
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }, [selectedGR, grs]);
 
   useEffect(() => {
     const fetchGRs = async () => {
@@ -37,9 +47,11 @@ export default function ExecutiveDashboard({ user }) {
       await axios.post(`http://localhost:5000/api/gr/${grId}/approve`, {
         userId: user.id,
         status: nextStatus,
+        signatureImage: signatureImage // Pass drawn signature
       });
       setGrs(prev => prev.filter(gr => gr.id !== grId));
       setSelectedGR(null);
+      setSignatureImage(null);
       alert(user.role === 'minister' ? '✅ GR approved and signed off!' : '✅ GR approved and forwarded to Minister!');
     } catch (error) {
       alert('Error approving GR: ' + error.message);
@@ -200,6 +212,124 @@ export default function ExecutiveDashboard({ user }) {
                 View Full Document →
               </button>
             </div>
+
+            {/* Signature Pad for Ministers */}
+            {user.role === 'minister' && (
+              <div style={{
+                marginTop: '15px',
+                padding: '15px',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                backgroundColor: '#f8fafc',
+                textAlign: 'left'
+              }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#1e293b', display: 'block', marginBottom: '8px' }}>
+                  ✍️ Hon. Minister Signature Drawing Pad (मंत्री स्वाक्षरी ड्रॉइंग टॅब)
+                </label>
+                <div style={{ position: 'relative', width: 'fit-content' }}>
+                  <canvas
+                    id="minister-signature-canvas"
+                    width={400}
+                    height={120}
+                    style={{
+                      border: '2px dashed #94a3b8',
+                      borderRadius: '6px',
+                      background: '#ffffff',
+                      cursor: 'crosshair',
+                      touchAction: 'none'
+                    }}
+                    onMouseDown={(e) => {
+                      const canvas = e.target;
+                      const ctx = canvas.getContext('2d');
+                      const rect = canvas.getBoundingClientRect();
+                      ctx.strokeStyle = '#023c1e'; // Greenish-dark official ink
+                      ctx.lineWidth = 3.5;
+                      ctx.lineCap = 'round';
+                      ctx.lineJoin = 'round';
+                      ctx.beginPath();
+                      ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+                      canvas.isDrawing = true;
+                    }}
+                    onMouseMove={(e) => {
+                      const canvas = e.target;
+                      if (!canvas.isDrawing) return;
+                      const ctx = canvas.getContext('2d');
+                      const rect = canvas.getBoundingClientRect();
+                      ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+                      ctx.stroke();
+                    }}
+                    onMouseUp={(e) => {
+                      const canvas = e.target;
+                      canvas.isDrawing = false;
+                      const dataUrl = canvas.toDataURL();
+                      setSignatureImage(dataUrl);
+                    }}
+                    onMouseLeave={(e) => {
+                      const canvas = e.target;
+                      canvas.isDrawing = false;
+                    }}
+                    onTouchStart={(e) => {
+                      const canvas = e.target;
+                      const ctx = canvas.getContext('2d');
+                      const rect = canvas.getBoundingClientRect();
+                      ctx.strokeStyle = '#023c1e';
+                      ctx.lineWidth = 3.5;
+                      ctx.lineCap = 'round';
+                      ctx.lineJoin = 'round';
+                      ctx.beginPath();
+                      const touch = e.touches[0];
+                      ctx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
+                      canvas.isDrawing = true;
+                    }}
+                    onTouchMove={(e) => {
+                      const canvas = e.target;
+                      if (!canvas.isDrawing) return;
+                      e.preventDefault();
+                      const ctx = canvas.getContext('2d');
+                      const rect = canvas.getBoundingClientRect();
+                      const touch = e.touches[0];
+                      ctx.lineTo(touch.clientX - rect.left, touch.clientY - rect.top);
+                      ctx.stroke();
+                    }}
+                    onTouchEnd={(e) => {
+                      const canvas = e.target;
+                      canvas.isDrawing = false;
+                      const dataUrl = canvas.toDataURL();
+                      setSignatureImage(dataUrl);
+                    }}
+                  />
+                  
+                  <div style={{ marginTop: '6px', display: 'flex', gap: '10px' }}>
+                    <button
+                      type="button"
+                      style={{
+                        padding: '4px 8px',
+                        backgroundColor: '#ef4444',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => {
+                        const canvas = document.getElementById('minister-signature-canvas');
+                        if (canvas) {
+                          const ctx = canvas.getContext('2d');
+                          ctx.clearRect(0, 0, canvas.width, canvas.height);
+                          setSignatureImage(null);
+                        }
+                      }}
+                    >
+                      Clear Pad
+                    </button>
+                    <span style={{ fontSize: '11px', color: '#64748b', alignSelf: 'center' }}>
+                      Draw signature here. It will embed automatically in the final resolution PDF.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div className="action-buttons" style={{ display: 'flex', gap: '10px' }}>

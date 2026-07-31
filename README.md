@@ -30,23 +30,37 @@ The compliance & search engine queries and validates drafts against an indexed d
 - **Scheme Name Duplication & Cross-Department Overlap**: Scans existing schemes in other departments to alert officers to inter-departmental conflicts.
 - **Missing Required Prerequisites**: Checks for mandatory 15-digit budget heads, parent acts, and original GR references.
 
-### 3. **TASK B & C: Bilingual Compliance Text Generation (Marathi & English)**
+### 3. **Reference Parser Module (FR-1, FR-2, FR-3)**
+- **Multi-Type Citation Extraction**: Regex-based parsing automatically extracts cited Government Resolutions, Circulars, and Court Orders from the draft preamble.
+- **98k Index verification**: Queries citation IDs against the database containing 98k historical resolutions to verify existence.
+- **Interactive Highlighting & Modal Views**: Missing references trigger alerts in the right-pane workspace, while valid reference citations are linked directly to full-text modal inspection views.
+
+### 4. **Semantic Conflict Detector (FR-4, FR-5, FR-6)**
+- **Sentence-Level TF-IDF Similarity**: Splits candidate document clauses into individual sentences to compare against short draft clauses, eliminating vocabulary size discrepancies and paragraph-parsing errors.
+- **Stop-Word Reduction & High Performance**: Employs an administrative stop-word filter (`SEMANTIC_IGNORE_WORDS`) to reduce search space to the top 50 candidates, keeping processing latency under 15ms.
+- **Remediation & Auto-Fix**: Triggers alerts displaying similarity percentage, department of origin, and the conflicting sentence as evidence. Links directly to Auto-Fix for LLM-based draft rewrites.
+
+### 5. **Template Enforcement Engine (FR-10, FR-11, FR-12)**
+- **Office Manual Structural Audits**: Validates structure according to the *Maharashtra Manual of Office Procedure* (Preamble background, Reference read, Resolution mandates, and Signatures).
+- **Budget Head Format Control**: For financial sanctions, verifies presence of DDO, amount, and budget head code, enforcing format matching `XXXX-XX-XXX-XX-XX` or 15-digit numeric codes.
+- **Signatory Authority Auditing**: Enforces presence of the official Governor sanction statement (*"By order and in the name of the Governor of Maharashtra"*) in the signature block.
+
+### 6. **Bilingual Compliance Text Generation (TASK B & C)**
 - Generates formal traditional **Marathi Administrative Vernacular (शासकीय मराठी)** for preamble and resolution clauses.
 - Generates formal **Administrative English** text ("Read with...", "Pursuant to...", "The Government is pleased to accord sanction...").
 - **Continuous Numbered List**: Omits null/blank fields cleanly without creating gap lines or breaking line numbering sequences.
 
-### 4. **Secure 21-Digit System GR ID & Rajmudra Emblem Letterhead**
+### 7. **Secure 21-Digit System GR ID & Rajmudra Emblem Letterhead**
 - Generates standard 21-digit GR IDs (`YYYYMMDDHHMMSSXXXXXX`, e.g., `20260728114530120301`).
 - Cryptographic security checksum token (e.g., `SEC-MH-9F81A2B7-2026`).
 - Official Government letterhead layout featuring the **Maharashtra Rajmudra Emblem ("प्रतिपच्चंद्रलेखेव वर्धिष्णुर्विश्ववंदिता...")** and Tricolor Motif.
 
-### 5. **Hyper-Fast DB Search & Clickable Precursor References**
-- Instant keyword and department search across historical records.
-- **Clickable Reference GR Links**: Precursor GR references cited by AI or users can be clicked to view their full text in a modal or new window.
-- Appends the **Top 3 Historical Reference GRs** with live document links at the document footer.
-
-### 6. **Real-Time Input Field Verification**
-- As the user types in the Mad-Libs form (e.g., 15-digit Budget Head, DDO Title, Amount), real-time verification badges display:
+### 8. **UI Navigation Outline & Edit Audit Trail (FR-13, FR-14, FR-15, FR-16)**
+- **Left-Side Document Navigator**: Provides a sticky vertical outline menu linking to each section of the draft with smooth scrolling.
+- **Auto-Logging Audit History**: Tracks manual edits by comparing version deltas in saved sections, and records accepted AI Suggestions including the resolved alert name.
+- **Timeline Logs Panel**: Displays the complete history log stream (actions, actor names, comments, and dates) in the workspace alerts pane.
+- **Dynamic Print Exports**: Integrates user signature block edits directly into PDF/HTML download pages.
+- **Real-Time Input Field Verification**: As the user types in the Mad-Libs form (e.g., 15-digit Budget Head, DDO Title, Amount), real-time verification badges display:
   - `✅ Verified in DB`
   - `🚨 CRITICAL: Exceeds Cap`
   - `ℹ️ Custom DDO / Valid Format`

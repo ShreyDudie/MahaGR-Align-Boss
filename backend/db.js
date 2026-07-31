@@ -267,4 +267,42 @@ export async function getAllGRs(filters = {}) {
   }));
 }
 
+/**
+ * Save references for a GR
+ */
+export async function saveReferences(grId, references) {
+  const db_instance = await initDB();
+
+  // Clear existing references for this GR to avoid duplicates
+  await db_instance.run('DELETE FROM gr_references WHERE gr_id = ?', [grId]);
+
+  if (!references || references.length === 0) return;
+
+  for (const ref of references) {
+    await db_instance.run(
+      `INSERT INTO gr_references (gr_id, referenced_gr_id, reference_text)
+       VALUES (?, ?, ?)`,
+      [grId, ref.sourceGrId || null, ref.sourceText || ref.grNumber]
+    );
+  }
+}
+
+/**
+ * Get references for a GR
+ */
+export async function getReferences(grId) {
+  const db_instance = await initDB();
+  const rows = await db_instance.all(
+    'SELECT * FROM gr_references WHERE gr_id = ?',
+    [grId]
+  );
+  return rows.map(row => ({
+    id: row.id,
+    grId: row.gr_id,
+    referencedGrId: row.referenced_gr_id,
+    referenceText: row.reference_text
+  }));
+}
+
 export { db };
+

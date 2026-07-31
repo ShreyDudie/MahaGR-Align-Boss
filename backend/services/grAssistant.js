@@ -4,7 +4,7 @@
  */
 
 export class GRAssistant {
-  constructor(indexer, geminiKey = process.env.GEMINI_API_KEY, geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash') {
+  constructor(indexer, geminiKey = process.env.GEMINI_API_KEY, geminiModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash') {
     this.indexer = indexer;
     this.geminiKey = geminiKey;
     this.geminiModel = geminiModel;
@@ -31,7 +31,7 @@ export class GRAssistant {
     const keywords = queryLower.replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 1 && !stopwords.has(w));
 
     if (keywords.length === 0) {
-      return this.indexer.grs.slice(0, 5);
+      return [];
     }
 
     // Domain / Topic specific department boosting maps
@@ -91,89 +91,82 @@ export class GRAssistant {
    * Helper to dynamically synthesize answer & parameters based on user query and top GR content
    */
   _extractShortBulletPoints(topGR, userQuery = '') {
-    const q = userQuery.toLowerCase();
     const dept = topGR.department?.replace(/_/g, ' ') || 'State Government';
     const subject = topGR.metadata?.subject || 'Government Resolution';
-    const allText = (topGR.sections?.resolutions || []).map(r => r.text).join(' ');
-
-    let directAnswer = '';
+    const date = topGR.metadata?.date || 'N/A';
+    
+    // Direct answer paragraph summarizing the GR naturally like a human
+    const directAnswer = `I found a Government Resolution regarding **${subject}**. It was issued by the **${dept}** on **${date}** under Resolution No. **${topGR.metadata?.grNumber || topGR.id}**.`;
+    
     const bullets = [];
-
-    // Dynamically determine Answer Paragraph and Core Parameters based on query topic
-    if (q.includes('loan') || q.includes('farmer') || q.includes('shetkari') || q.includes('debt')) {
-      directAnswer = `Yes, we authorize **crop loan waivers and financial debt relief** for eligible farmers across Maharashtra under state agricultural credit policies.`;
-      bullets.push(`• Department: **${dept}**`);
-      bullets.push(`• Target Group: **Small & marginal farmers with crop loans**`);
-      
-      const mainFin = (topGR.sections?.financials || []).find(f => f.amountNumeric || f.amount);
-      if (mainFin) {
-        bullets.push(`• Debt Relief Limit: **₹${mainFin.amount || mainFin.amountNumeric}**`);
-      } else {
-        bullets.push(`• Relief Cap: **Up to ₹2.00 Lakh per farmer**`);
-      }
-      
-      bullets.push(`• Eligibility: **Active short-term agricultural loan accounts**`);
-      bullets.push(`• Channel: **District Central Co-operative Banks (DCCBs)**`);
-    } else if (q.includes('sc') || q.includes('st') || q.includes('caste') || q.includes('tribe') || q.includes('scholarship')) {
-      directAnswer = `Yes, we provide **post-matric tuition fee waivers and scholarship stipends** for eligible SC/ST category students pursuing higher education.`;
-      bullets.push(`• Department: **${dept}**`);
-      bullets.push(`• Target Group: **SC/ST & reserved category students**`);
-      bullets.push(`• Benefit Scale: **100% tuition & exam fee reimbursement**`);
-      
-      if (allText.includes('8.00 lakh') || allText.includes('8 lakh')) {
-        bullets.push(`• Income Limit: **Under ₹8.00 Lakh annual family income**`);
-      } else {
-        bullets.push(`• Income Limit: **Prescribed annual family income ceiling**`);
-      }
-      bullets.push(`• Application: **Online via MahaDBT state portal**`);
-    } else if (q.includes('solar') || q.includes('pump')) {
-      directAnswer = `Yes, we sanction **off-grid solar agricultural pump subsidies** of up to 90-95% for state farmers under renewable energy schemes.`;
-      bullets.push(`• Department: **${dept}**`);
-      bullets.push(`• Subsidy Rate: **Up to 95% state & central government subsidy**`);
-      bullets.push(`• Eligible Farmers: **Agricultural landholders without grid power**`);
-      bullets.push(`• Pump Capacity: **3 HP, 5 HP, and 7.5 HP solar sets**`);
-      bullets.push(`• Implementation: **MSEDCL & MEDA authorized vendors**`);
-    } else if (q.includes('health') || q.includes('lumpy') || q.includes('hospital') || q.includes('disease')) {
-      directAnswer = `Yes, we issue **public health guidelines and emergency financial sanctions** for disease control and veterinary assistance across Maharashtra.`;
-      bullets.push(`• Department: **${dept}**`);
-      bullets.push(`• Objective: **${subject.slice(0, 60)}**`);
-      
-      const mainFin = (topGR.sections?.financials || []).find(f => f.amountNumeric || f.amount);
-      if (mainFin) {
-        bullets.push(`• Financial Grant: **₹${mainFin.amount || mainFin.amountNumeric} sanctioned**`);
-      } else {
-        bullets.push(`• Financial Provision: **As per emergency state health budget**`);
-      }
-      bullets.push(`• Implementation: **District Health Officers & Civil Hospitals**`);
-      bullets.push(`• Coverage: **All affected districts across Maharashtra**`);
+    
+    // 1. Core Mandates / Resolution clauses
+    const clauses = topGR.sections?.resolutions || [];
+    if (clauses.length > 0) {
+      // Pick the first 2 clauses as the key points
+      clauses.slice(0, 2).forEach((c, idx) => {
+        const cleanText = c.text.substring(0, 120).replace(/\n/g, ' ').trim();
+        bullets.push(`• **Clause #${idx + 1}**: *"${cleanText}${c.text.length > 120 ? '...' : ''}"*`);
+      });
     } else {
-      // Dynamic fallback for any general topic
-      directAnswer = `Yes, we authorize official administrative orders regarding **${subject.slice(0, 100)}**.`;
-      bullets.push(`• Department: **${dept}**`);
-      bullets.push(`• Resolution Subject: **${subject.slice(0, 60)}**`);
-      
-      const mainFin = (topGR.sections?.financials || []).find(f => f.amountNumeric || f.amount);
-      if (mainFin) {
-        bullets.push(`• Financial Sanction: **₹${mainFin.amount || mainFin.amountNumeric}**`);
-      } else {
-        bullets.push(`• Financial Terms: **As per state budget allocation**`);
-      }
-      bullets.push(`• Status: **Official Active Government Resolution**`);
-      bullets.push(`• Effective Date: **${topGR.metadata?.date || 'As per official order date'}**`);
+      bullets.push(`• **Status**: This contains official administrative rules and execution orders.`);
     }
 
-    return `${directAnswer}\n\n${bullets.join('\n')}`;
+    // 2. Financial allocations if present
+    const mainFin = (topGR.sections?.financials || []).find(f => f.amountNumeric || f.amount);
+    if (mainFin) {
+      bullets.push(`• **Financial Sanction**: **₹${mainFin.amount || mainFin.amountNumeric}**`);
+      if (mainFin.context) {
+        // Extract a clean snippet of the context
+        const cleanContext = mainFin.context.substring(0, 80).replace(/\n/g, ' ').trim();
+        bullets.push(`• **Budget Details**: *"${cleanContext}..."*`);
+      }
+    }
+    
+    // 3. Account Heads
+    const acctHead = (topGR.sections?.financials || []).find(f => f.type === 'accountHead');
+    if (acctHead && acctHead.accountHead) {
+      bullets.push(`• **Account Head**: Code **${acctHead.accountHead}**`);
+    }
+
+    // 4. Districts / Jurisdiction if present
+    if (topGR.districts && topGR.districts.length > 0) {
+      bullets.push(`• **Jurisdiction**: Applicable to **${topGR.districts.join(', ')}**`);
+    }
+
+    return `${directAnswer}\n\nHere are the key points from the document:\n${bullets.join('\n')}`;
   }
 
   /**
    * Synthesize conversational English response from query and retrieved GRs
    */
   async chat(userQuery) {
+    const qClean = userQuery.toLowerCase().trim().replace(/[?.]/g, '');
+    const greetings = new Set(['hi', 'hello', 'hey', 'greetings', 'hola']);
+    const helpQueries = [
+      'what can you do', 'what can u do', 'help', 'who are you', 'what is this', 
+      'how to use', 'what can u tell me', 'what can you tell me', 'what do you do'
+    ];
+
+    if (greetings.has(qClean)) {
+      return {
+        answer: "Hello! I am your MahaGR AI Assistant. I can search through 98,980+ Maharashtra Government Resolutions and summarize their details for you. What policy or topic are you interested in today?",
+        matchingGRs: []
+      };
+    }
+    
+    if (helpQueries.some(hq => qClean.includes(hq))) {
+      return {
+        answer: "I am an AI assistant trained on the database of 98,980+ Maharashtra Government Resolutions. You can ask me about agricultural schemes, educational scholarships, public health orders, department sanctions, or specific resolution subjects. I will find the relevant documents, summarize the core details, and provide links to view the official resolutions.",
+        matchingGRs: []
+      };
+    }
+
     const matchingGRs = this._findRelevantGRs(userQuery);
 
     if (matchingGRs.length === 0) {
       return {
-        answer: `We currently have no record of an active Government Resolution matching "${userQuery}". Please search using alternative keywords like "scholarship", "subsidy", or "sanction".`,
+        answer: "I do not know the answer to this question as it is not present in the Government Resolution database.",
         matchingGRs: []
       };
     }
@@ -209,6 +202,7 @@ Write a 1-to-2 sentence conversational response answering the query directly. Bo
 Provide 3 to 5 single-fragment bullet points detailing exact rules, requirements, or data numbers relevant to the query. DYNAMICALLY derive bullet labels and values directly from the query topic (e.g. Target Group, Benefit Cap, Department, Channel, Subsidy Rate, Eligibility). Every bullet point MUST be under 10 words.
 
 CRITICAL RULES:
+- ABSOLUTE DATABASE FIDELITY: If the retrieved database records do not contain the answer to the user query, or if the records are not relevant to the user query, you MUST output exactly: "I do not know the answer to this question as it is not present in the Government Resolution database." and nothing else. Do not attempt to use external training knowledge.
 - NEVER exceed 80 words total across the entire response.
 - Start immediately with the direct answer paragraph. NO greetings or pleasantries like "Hello!".
 - Do NOT output static tuition/MahaDBT templates for non-educational queries (e.g. farmer loans, health, energy).

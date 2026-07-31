@@ -289,3 +289,146 @@ Verify that the floating AI assistant widget allows users to search the 98,000+ 
 6. **Expected Outcome**:
    - An official document modal immediately pops up overlaying the screen, displaying the complete resolution document (Header with official emblems, Preamble, Government Resolution clauses, Financial details).
    - Click **🖨️ Open Full PDF View** or `×` to close.
+
+---
+
+## 🔍 Userflow 11: Reference Parser Verification (FR-1, FR-2, FR-3)
+
+### Intent
+Verify that the reference parser accurately extracts precursor GRs, Circulars, and Court Orders from the draft preamble, queries the 98k historical index to confirm their existence, and flags invalid/unverified references.
+
+### Steps
+1. Navigate to **Create GR** (`/create`) under **Clerk** mode.
+2. Complete Step 1 with a preamble citing multiple document types:
+   - *Trigger / Incident*: `Pursuant to Government Resolution, Finance Department, No. Asank-1004/ Q.No.12/ (Part-II)/ 2004/ Financial Reforms-1D dated 04/10/2004 and Circular No. SAMRIDH-2317/ PR No. 189/5 and pursuant to the High Court Order in Writ Petition No. 4613/2008.`
+   - *Targeted Action*: `Approve funding allocation.`
+3. Click **Generate Government Resolution**.
+4. **Expected Outcome**:
+   - The right-hand pane shows the verification results.
+   - Circular `SAMRIDH-2317/ PR No. 189/5` and Court Order `4613/2008` exist in the index database and are successfully verified. No alerts are generated for them.
+   - The historical GR `Asank-1004/ Q.No.12/...` from 2004 is extracted but flags a low-severity alert `Referenced GR may not exist` because it is outside the active indexed set.
+5. In the preamble editor, type: `GR No. INVALID-GR-99999-DATED-2026`.
+6. Wait 1 second for reactive dryrun verification to trigger.
+7. **Expected Outcome**:
+   - The verifier highlights the invalid reference: `Referenced GR may not exist: INVALID-GR-99999-DATED-2026`.
+
+---
+
+## 🧠 Userflow 12: Semantic Conflict Detector (FR-4, FR-5, FR-6)
+
+### Intent
+Verify that the semantic search splits resolutions into sentences and computes similarities against other departments' policies, alerting the user to overlapping mandates and providing auto-fix rewrites.
+
+### Steps
+1. Navigate to **Create GR** (`/create`) under **Clerk** mode.
+2. Set the department in the header to **Finance Department**.
+3. Proceed to Step 2, select **💰 1. Financial Sanction**.
+4. Under the Resolution clauses editor, type the following overlapping clause:
+   - *"In 2018-19, the Department of Finance, under the scheme of Promotion of Group Farming of Farmers for Promotion and Empowerment of Group Farming, has approved Rs. 10 crore for disbursement to the Office of the Agriculture Commissioner."*
+5. Save or wait for dryrun verification to run.
+6. **Expected Outcome**:
+   - The system queries the database, extracts sentences from cross-department candidates, and calculates cosine similarity.
+   - A high-severity alert is triggered: `Semantic Conflict (75% similarity)`.
+   - The warning specifies: `Draft clause overlaps with existing policy in 'Agriculture_Dairy_Development_Animal_Husbandry_and_Fisheries_Department' (GR ID: 201804131513183101.pdf.en).`
+   - It displays the conflicting sentence as evidence: `Promotion of group farming of farmers for promotion and empowerment of group farming`.
+7. Test the resolution actions on the alert card:
+   - **Option A (Preview Fix)**: Click **🔧 Preview Fix**. The system renders a side-by-side diff comparison in the middle column. Click **Accept ✓** to apply it.
+   - **Option B (Direct Auto-Resolve)**: Click **⚡ Auto-Resolve**. The system updates the conflicting resolution text immediately and automatically clears the alert.
+
+---
+
+## 🚫 Userflow 13: Template Enforcement Engine (FR-10, FR-11, FR-12)
+
+### Intent
+Verify that structural checks enforce the Maharashtra Manual of Office Procedures, validate budget heads, audit signature details, and block final submission on critical violations.
+
+### Steps
+1. Navigate to **Create GR** (`/create`) under **Clerk** mode.
+2. Generate a draft, then clear the **Introduction (Preamble)** and **Resolution** content in the workspace cards.
+3. **Expected Outcome**:
+   - The verifier raises multiple critical alerts: `Missing Preamble/Introduction` and `Missing Resolution Mandates`.
+   - The **Submit for Review** button is disabled.
+4. Select **💰 1. Financial Sanction** archetype. Edit the financials table:
+   - Enter budget head: `abc-123` (invalid format).
+5. **Expected Outcome**:
+   - The verifier raises a critical alert: `Incorrect Budget Head Format`.
+6. Edit the **Signature Block** card:
+   - Clear the text or enter: `Signed by Desk Officer John`.
+7. **Expected Outcome**:
+   - The verifier raises a high-severity alert: `Incorrect Signature Header format`, stating the Governor of Maharashtra is not cited as the executive authority.
+8. Modify the signature text to: `By order and in the name of the Governor of Maharashtra,\n\n(John Doe)`.
+9. Modify the budget head to: `2202-01-101-01-03`.
+10. **Expected Outcome**:
+    - The critical alerts disappear, and the **Submit for Review** button is unlocked.
+
+---
+
+## 📜 Userflow 14: Outline Navigator & Change History Audit Trail (FR-13, FR-15)
+
+### Intent
+Verify that the left outline panel scrolls the page to selected sections and that manual edits and accepted AI suggestions are saved in the history timeline.
+
+### Steps
+1. Navigate to the **Draft Workspace** for any active draft.
+2. Inspect the left-hand column:
+   - Clicking **Resolutions** scrolls the resolution card smoothly into view.
+   - Clicking **Signature** scrolls the signature card smoothly into view.
+3. Click the edit pencil `✎` on the **Introduction** card, modify the text, and click save `✓` or wait for autosave.
+4. **Expected Outcome**:
+   - A timeline entry is immediately added to the **Audit Trail & Edit Log** panel in the right pane: `Human Edit | By: John Doe (Desk Officer) | comment: "Edited section(s): introduction"`.
+5. Trigger a semantic conflict warning and click **🔧 Auto-Fix**.
+6. In the AI Suggestion accept/reject box, click **Accept ✓**.
+7. **Expected Outcome**:
+   - The text is rewritten.
+   - A new timeline entry is recorded in the Audit Trail log: `AI Suggestion Accepted | By: John Doe (Desk Officer) | comment: "Applied auto-fix for: "Semantic Conflict (75% similarity)""`.
+8. Switch role to **Minister: Hon. Minister Patil** and open the **Executive Review** dashboard. The audit timeline displays the exact sequence of human edits and suggestion accept logs.
+
+---
+
+## 🏛️ Userflow 15: Marathi-English Term Mismatch (Glossary Validation)
+
+### Intent
+Verify that the system highlights Marathi-English terminology mismatches (e.g., draft belongs to Finance Department but the Marathi text cites 'गृह विभाग' / Home Department) against a small bilingual glossary.
+
+### Steps
+1. Navigate to **Create GR** (`/create`) under **Clerk** mode.
+2. Complete Step 1:
+   - Choose department: **Finance Department** (in Global Header).
+   - Enter Trigger / Incident: `Urgent funding needed for development.`
+   - Enter Targeted Action / Executive Order: `वित्त विभाग authorizes budget allocation.`
+3. Click **Generate Government Resolution**.
+4. In the generated **Draft Workspace**:
+   - Locate the **Resolution (शासन निर्णय)** card and click the edit icon `✎`.
+   - Insert the mismatched term inside the resolution body text: `या योजनेचे संनियंत्रण गृह विभाग द्वारे केले जाईल.` (This translates to: "This scheme will be monitored by the Home Department.").
+   - Save or wait 1 second for reactive dryrun verification to run.
+5. **Expected Outcome**:
+   - The verifier highlights the mismatch by raising a medium-severity alert in the right pane: `Bilingual Term Mismatch: गृह विभाग`.
+   - The description details: `Draft department is 'Finance Department', but the Marathi text cites 'गृह विभाग' (associated with 'Home Department').`
+   - Remediations suggest: `Verify if 'गृह विभाग' is correct or align it with the 'Finance Department' ('वित्त विभाग').`
+6. Edit the resolution text to change `गृह विभाग` to `वित्त विभाग` and save.
+7. **Expected Outcome**: The terminology mismatch alert is cleared.
+
+---
+
+## ⚖️ Userflow 16: Controlled Glossary Term Validation (FR-7, FR-8, FR-9)
+
+### Intent
+Verify that the system flags unapproved Marathi translations when their standard administrative English counterparts are used (e.g. using "भरती" instead of "नियुक्ती" when "appoint" is in the document context) and suggests standard terms.
+
+### Steps
+1. Navigate to **Create GR** (`/create`) under **Clerk** mode.
+2. Complete Step 1:
+   - Choose department: **Finance Department** (in Global Header).
+   - Enter Trigger / Incident: `Decision to appoint emergency project coordinators.` (Contains the term 'appoint').
+   - Enter Targeted Action / Executive Order: `Approve staffing mandates.`
+3. Click **Generate Government Resolution**.
+4. In the generated **Draft Workspace**:
+   - Locate the **Resolution (शासन निर्णय)** card and click the edit icon `✎`.
+   - Insert an unapproved translation term in the resolution body text: `या पदांवर नवीन उमेदवारांची तात्काळ भरती करण्यात यावी.` (uses unapproved term 'भरती' instead of approved translation 'नियुक्ती').
+   - Save or wait 1 second for reactive dryrun verification to run.
+5. **Expected Outcome**:
+   - The verifier highlights the unapproved terminology by raising a low-severity alert in the right pane: `Unapproved terminology: "भरती"`.
+   - The description details: `The unapproved Marathi term "भरती" was found. For standard administrative English term "appoint", the approved translation is "नियुक्ती".`
+   - Remediations suggest: `Replace "भरती" with the approved standard term "नियुक्ती".`
+6. Edit the resolution text to change `भरती` to `नियुक्ती` and save.
+7. **Expected Outcome**: The terminology alert is cleared.

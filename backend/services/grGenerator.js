@@ -65,18 +65,10 @@ export class GRGenerator {
     const signee = inputData.signee_designation || 'Under Secretary to Government of Maharashtra';
     const grType = inputData.gr_type || inputData.intentType || '1_FINANCIAL_SANCTION';
 
-    // Format References Block
-    const readRefs = inputData.read_references || [
-      `${refDoc}`,
-      `Government Resolution, Finance Department No. FIN-2024/CR-12, Dated 15th January 2024.`,
-      `Concurrence Note of Planning Department, Ref PLN-2025/CR-88.`
-    ];
 
-    const readSectionText = `Read:\n` + readRefs.map((r, idx) => `${idx + 1}. ${r}`).join('\n');
 
     // Build English Preamble
     const preambleEnglish = `In view of ${trigger}, and pursuant to the directions issued under ${refDoc}, the Government of Maharashtra in the ${dept} has carefully considered the proposal for ${action}. Following comprehensive administrative and financial evaluation, the Government is pleased to issue the following Resolution.`;
-    const preambleMarathi = preambleEnglish;
 
     // Build Resolution Clauses dynamically (Omit null fields, append flex-fields)
     const clausesMarathi = [];
@@ -256,8 +248,17 @@ export class GRGenerator {
           });
 
           if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.error?.message || `Gemini API error ${response.status}`);
+            const errText = await response.text().catch(() => '');
+            let errMsg = `Gemini API error ${response.status}`;
+            try {
+              const errData = JSON.parse(errText);
+              if (errData.error?.message) {
+                errMsg = errData.error.message;
+              }
+            } catch (e) {
+              errMsg = `${errMsg}: ${errText.slice(0, 150)}`;
+            }
+            throw new Error(errMsg);
           }
           const data = await response.json();
           responseText = data.candidates[0].content.parts[0].text;
@@ -420,7 +421,8 @@ export class GRGenerator {
           ddo: inputData.drawing_disbursing_officer
         }] : [],
         distribution: (structuredOutput.footer_distribution_list || []).map((recipient, idx) => ({ order: idx + 1, recipient })),
-        footer_distribution_text: structuredOutput.footer_distribution_text || ''
+        footer_distribution_text: structuredOutput.footer_distribution_text || '',
+        signature: `By order and in the name of the Governor of Maharashtra,\n\n\n(Shri. ${inputData.signee_name || 'S. R. Patil'})\n${inputData.signee_designation || 'Under Secretary to Government'}`
       },
       historical_references: topHistoricalGRs,
       districts: inputData.district ? [inputData.district] : (inputData.districts || []),

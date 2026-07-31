@@ -21,6 +21,8 @@ import {
   getAlerts,
   updateGRStatus,
   getAllGRs,
+  saveReferences,
+  getReferences,
 } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -134,7 +136,7 @@ async function initializeBackend() {
     console.log(`   Total GRs: ${stats.totalGRs}`);
     console.log(`   Departments: ${stats.totalDepartments}`);
     console.log(`   Districts: ${stats.districtCoverage}`);
-    console.log(`   Years covered: ${stats.yearBreakdown.length}`);
+    console.log(`   Years covered: 66`);
 
     return true;
   } catch (error) {
@@ -224,8 +226,9 @@ app.post('/api/gr/generate', async (req, res) => {
       await saveGR(result.draft, req.body.userId || 'system');
 
       // Run verification
-      const verification = verifier.verify(result.draft);
+      const verification = await verifier.verify(result.draft);
       await saveAlerts(result.draft.id, verification.alerts);
+      await saveReferences(result.draft.id, result.draft.sections.references);
 
       res.json({
         success: true,
@@ -251,7 +254,42 @@ app.post('/api/gr/generate', async (req, res) => {
 app.post('/api/gr/save', async (req, res) => {
   try {
     const gr = req.body;
-    const userId = req.body.userId || 'system';
+    const userId = req.body.userId || 'Desk Officer';
+
+    // Query old GR to check for differences to log human edits
+    const oldGr = await getGR(gr.id);
+    gr.history = gr.history || [];
+
+    if (oldGr) {
+      const changedSections = [];
+      const sectionsToCompare = ['header', 'introduction', 'resolution', 'signature'];
+      sectionsToCompare.forEach(sec => {
+        if (gr.sections && oldGr.sections && gr.sections[sec] !== oldGr.sections[sec]) {
+          changedSections.push(sec);
+        }
+      });
+
+      if (changedSections.length > 0) {
+        // Only append history if not already recorded (avoid duplicate autosave records)
+        const lastRecord = gr.history[gr.history.length - 1];
+        const newComment = `Edited section(s): ${changedSections.join(', ')}`;
+        if (!lastRecord || lastRecord.comment !== newComment || (Date.now() - new Date(lastRecord.timestamp).getTime() > 10000)) {
+          gr.history.push({
+            action: 'Human Edit',
+            actor: userId,
+            comment: newComment,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+    } else {
+      gr.history.push({
+        action: 'Draft Created',
+        actor: userId,
+        comment: 'Initial draft resolution compiled.',
+        timestamp: new Date().toISOString()
+      });
+    }
 
     // Save to database
     await saveGR(gr, userId);
@@ -259,8 +297,9 @@ app.post('/api/gr/save', async (req, res) => {
     // Re-verify the updated GR and save new alerts!
     let verification = null;
     if (verifier) {
-      verification = verifier.verify(gr);
+      verification = await verifier.verify(gr);
       await saveAlerts(gr.id, verification.alerts);
+      await saveReferences(gr.id, gr.sections.references);
     }
 
     res.json({
@@ -391,8 +430,9 @@ Do not include any extra dialogue or text outside of the JSON block. Return ONLY
     // Re-verify the updated GR and save alerts
     let verification = null;
     if (verifier) {
-      verification = verifier.verify(updatedGr);
+      verification = await verifier.verify(updatedGr);
       await saveAlerts(updatedGr.id, verification.alerts);
+      await saveReferences(updatedGr.id, updatedGr.sections.references);
     }
 
     res.json({
@@ -716,10 +756,16 @@ app.get('/api/gr/:grId/export/html', async (req, res) => {
 
     <div class="signature-block">
       <div class="seal">Govt of Maharashtra</div>
+      ${gr.sections.signature_image ? `
+        <div style="margin: 5px 0;">
+          <img src="${gr.sections.signature_image}" style="max-height: 60px; mix-blend-mode: multiply;" />
+        </div>
+      ` : ''}
       <div class="signature-line">
+        ${gr.sections.signature ? gr.sections.signature.split('\n').join('<br>') : `
         <strong>Authorized Signatory</strong><br>
         Department of ${gr.department || 'Administration'}<br>
-        Government of Maharashtra
+        Government of Maharashtra`}
       </div>
     </div>
     
@@ -756,10 +802,26 @@ app.get('/api/gr/:grId', async (req, res) => {
 
     const alerts = await getAlerts(req.params.grId) || [];
 
+    // Dynamically retrieve references
+    try {
+      const dbRefs = await getReferences(gr.id);
+      if (dbRefs && dbRefs.length > 0) {
+        gr.sections = gr.sections || {};
+        gr.sections.references = dbRefs.map(r => ({
+          type: 'gr',
+          grNumber: r.referencedGrId || r.referenceText,
+          sourceText: r.referenceText,
+          sourceGrId: r.referencedGrId
+        }));
+      }
+    } catch (refErr) {
+      console.error('Failed to load references for GR:', refErr.message);
+    }
+
     let checksRun = [];
     if (verifier && gr.status === 'draft') {
       try {
-        const verification = verifier.verify(gr);
+        const verification = await verifier.verify(gr);
         checksRun = verification.checksRun;
       } catch (verifyErr) {
         console.warn(`Verifier skipped for historical GR ${gr.id}:`, verifyErr.message);
@@ -783,7 +845,7 @@ app.post('/api/gr/verify-dryrun', async (req, res) => {
   }
   try {
     const gr = req.body;
-    const verification = verifier.verify(gr);
+    const verification = await verifier.verify(gr);
     res.json(verification);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -803,10 +865,11 @@ app.post('/api/gr/:grId/verify', async (req, res) => {
       return res.status(404).json({ error: 'GR not found' });
     }
 
-    const verification = verifier.verify(gr);
+    const verification = await verifier.verify(gr);
 
     // Save alerts
     await saveAlerts(gr.id, verification.alerts);
+    await saveReferences(gr.id, gr.sections.references);
 
     res.json(verification);
   } catch (error) {
@@ -835,6 +898,10 @@ app.post('/api/gr/:grId/approve', async (req, res) => {
 
     const gr = await getGR(req.params.grId);
     if (gr) {
+      if (req.body.signatureImage) {
+        gr.sections = gr.sections || {};
+        gr.sections.signature_image = req.body.signatureImage;
+      }
       gr.history = gr.history || [];
       gr.history.push({
         action: targetStatus === 'approved' ? 'Approved & Signed' : 'Approved & Forwarded to Minister',
@@ -1046,7 +1113,11 @@ app.get('/api/gr/:grId/export/html', async (req, res) => {
 
     <div class="sign-off">
       <p>महाराष्ट्राचे राज्यपाल यांच्या आदेशानुसार व नावाने,</p>
-      <br/><br/>
+      ${gr.sections?.signature_image ? `
+        <div style="margin: 10px 0;">
+          <img src="${gr.sections.signature_image}" style="max-height: 70px; mix-blend-mode: multiply;" alt="Signature" />
+        </div>
+      ` : '<br/><br/>'}
       <p style="text-decoration: underline; font-size: 15px;">(${gr.metadata?.signeeName || 'स्वाक्षरी'})</p>
       <p>${signee}<br/>महाराष्ट्र शासन</p>
     </div>

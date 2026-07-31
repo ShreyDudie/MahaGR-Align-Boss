@@ -48,7 +48,18 @@ export class GRParser {
     const grNumberPattern = /(?:GR\s+No\.|Notification\s+No\.|Reference\s+No\.)[\s:]*([^\n]+)/i;
     const grMatch = content.match(grNumberPattern);
     if (grMatch) {
-      gr.metadata.grNumber = grMatch[1].trim();
+      let num = grMatch[1].trim();
+      const stopWords = ['has', 'is', 'was', 'dated', 'been', 'regarding'];
+      for (const sw of stopWords) {
+        const idx = num.toLowerCase().indexOf(' ' + sw + ' ');
+        if (idx !== -1) {
+          num = num.substring(0, idx);
+        }
+      }
+      if (num.length > 50) {
+        num = num.substring(0, 50).trim() + '...';
+      }
+      gr.metadata.grNumber = num.trim();
     }
 
     // Date pattern: "DD Month YYYY" or "DD/MM/YYYY" or "YYYY-MM-DD"
