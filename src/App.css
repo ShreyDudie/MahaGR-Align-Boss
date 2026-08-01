@@ -59,30 +59,31 @@ body {
   background: #0A2540;
   color: white;
   border-bottom: 3px solid #D4AF37;
+  width: 100%;
 }
 
 .header-container {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  position: relative;
+  display: flex;
   align-items: center;
+  justify-content: center;
   width: 100%;
-  max-width: 100%;
-  margin: 0;
-  gap: 24px;
-  padding: 16px 40px;
+  padding: 16px 0;
   box-sizing: border-box;
 }
 
-.logo-section {
-  display: flex;
-  align-items: center;
-  justify-self: start;
+.left-logo {
+  position: absolute;
+  left: 320px;
 }
 
-.emblem-section {
-  display: flex;
-  align-items: center;
-  justify-self: end;
+.left-logo img {
+  height: 56px;
+  width: auto;
+  object-fit: contain;
+  background: #ffffff;
+  padding: 4px 8px;
+  border-radius: 4px;
 }
 
 .rajmudra-emblem {
@@ -91,12 +92,31 @@ body {
   filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
 }
 
-.header-text {
+.title {
   text-align: center;
   justify-self: center;
 }
 
-.header-text .marathi-title {
+.right-logo {
+  position: absolute;
+  right: 320px;
+}
+
+.right-logo img {
+  height: 56px;
+  width: auto;
+  object-fit: contain;
+  border-radius: 50%;
+  background: #ffffff;
+  padding: 2px;
+}
+
+.profile {
+  position: absolute;
+  right: 40px;
+}
+
+.title .marathi-title {
   font-size: 13px;
   color: #D4AF37;
   font-weight: 700;
@@ -104,7 +124,7 @@ body {
   margin-bottom: 2px;
 }
 
-.header-text h1 {
+.title h1 {
   font-size: 24px;
   font-weight: 800;
   margin: 0;
@@ -112,7 +132,7 @@ body {
   letter-spacing: 0.5px;
 }
 
-.header-text .subtitle {
+.title .subtitle {
   font-size: 13px;
   color: #CBD5E1;
   margin: 2px 0 0 0;

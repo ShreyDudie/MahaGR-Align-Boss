@@ -58,26 +58,24 @@ function AppContent() {
       {/* Header - Government of Maharashtra Portal Style */}
       <header className="header">
         <div className="header-container">
-          <div className="logo-section">
+          <div className="left-logo">
             <img 
               src="/emblem_india_maharashtra.png" 
-              alt="State Emblem of India - Government of Maharashtra" 
-              style={{ height: '56px', width: 'auto', objectFit: 'contain', background: '#ffffff', padding: '4px 8px', borderRadius: '4px' }}
+              alt="Government of Maharashtra Emblem" 
             />
           </div>
-          <div className="header-text">
+          <div className="title">
             <div className="marathi-title">महाराष्ट्र शासन (Government of Maharashtra)</div>
             <h1>MAHARASHTRA GR-Align</h1>
             <p className="subtitle">डिजिटल कक्षा अधिकारी व धोरण लेखापरीक्षण प्रणाली | Digital Desk Officer & Policy Auditor System</p>
           </div>
-          <div className="emblem-section">
+          <div className="right-logo">
             <img 
               src="/maharashtra_rajmudra_seal.png" 
               alt="Maharashtra Rajmudra Seal" 
-              style={{ height: '56px', width: 'auto', objectFit: 'contain', borderRadius: '50%', background: '#ffffff', padding: '2px' }}
             />
           </div>
-          <div className="user-section">
+          <div className="profile">
             <div className="user-profile-menu">
               <button className="profile-toggle">
                 <div className="user-avatar">
