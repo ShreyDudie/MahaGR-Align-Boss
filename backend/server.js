@@ -30,9 +30,13 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load .env variables
-const envPath = path.resolve(process.cwd(), '.env');
+// ============================================================
+// Load .env variables - FIXED: Look in backend folder
+// ============================================================
+const envPath = path.resolve(__dirname, '.env');
+
 if (fs.existsSync(envPath)) {
+  console.log(`📂 Loading .env from: ${envPath}`);
   const envContent = fs.readFileSync(envPath, 'utf8');
   envContent.split('\n').forEach(line => {
     const cleanLine = line.trim();
@@ -46,6 +50,10 @@ if (fs.existsSync(envPath)) {
       }
     }
   });
+  console.log('✅ Environment variables loaded');
+} else {
+  console.warn(`⚠️ .env file not found at: ${envPath}`);
+  console.warn('💡 Create a .env file in the backend folder with GEMINI_API_KEY=your_key');
 }
 
 const app = express();
@@ -62,7 +70,7 @@ let generator = null;
 let assistant = null;
 
 // ============================================================
-// ENHANCED: General Knowledge Base for Government & Website Q&A
+// General Knowledge Base for Government & Website Q&A
 // ============================================================
 const generalKnowledgeBase = {
   // Website Information
@@ -146,7 +154,6 @@ async function initializeBackend() {
     if (!fs.existsSync(dataPath)) {
       console.warn('⚠️ Data directory not found. Creating sample data...');
       fs.mkdirSync(dataPath, { recursive: true });
-      // Create a sample department folder for testing
       const sampleDept = path.join(dataPath, 'Finance_Department');
       if (!fs.existsSync(sampleDept)) {
         fs.mkdirSync(sampleDept, { recursive: true });
@@ -211,19 +218,18 @@ async function initializeBackend() {
       console.log('ℹ️  No API key configured - Generator initialized in Local Fallback mode');
     }
 
-    // ENHANCED: Initialize Assistant with General Knowledge Base
-    assistant = new GRAssistant(indexer, geminiKey);
-    // Add general knowledge base to assistant
+    // ============================================================
+    // FIXED: Initialize Assistant with proper error handling
+    // ============================================================
     try {
-  assistant = new GRAssistant(indexer, geminiKey);
-  console.log('✅ AI Policy Search Assistant ready');
-} catch (error) {
-  console.error('❌ Assistant initialization error:', error);
-  // Create a fallback assistant
-  assistant = new GRAssistant(null, geminiKey);
-  console.log('⚠️ Assistant running in fallback mode');
-}
-    console.log('✅ AI Policy Search Assistant ready (GR Knowledge Base + General Government Info)');
+      assistant = new GRAssistant(indexer, geminiKey);
+      console.log('✅ AI Policy Search Assistant ready');
+    } catch (error) {
+      console.error('❌ Assistant initialization error:', error);
+      // Create a fallback assistant without indexer
+      assistant = new GRAssistant(null, geminiKey);
+      console.log('⚠️ Assistant running in fallback mode (no GR index)');
+    }
 
     // Log statistics
     const stats = indexer.getStatistics();
@@ -241,7 +247,7 @@ async function initializeBackend() {
 }
 
 // ============================================================
-// ENHANCED: General Knowledge Helper Functions
+// General Knowledge Helper Functions
 // ============================================================
 
 function getGeneralKnowledge(query) {
@@ -369,7 +375,7 @@ app.get('/api/districts', (req, res) => {
 });
 
 // ============================================================
-// ENHANCED: AI Policy Search Assistant Chatbot Endpoint
+// AI Policy Search Assistant Chatbot Endpoint
 // ============================================================
 app.post('/api/assistant/chat', async (req, res) => {
   try {
@@ -380,11 +386,10 @@ app.post('/api/assistant/chat', async (req, res) => {
 
     const userQuery = query.trim();
 
-    // STEP 1: Check if it's a general knowledge query (website, government facts, etc.)
+    // STEP 1: Check if it's a general knowledge query
     const generalResponse = getGeneralKnowledge(userQuery);
     
     if (generalResponse) {
-      // Return general knowledge response immediately
       return res.json({
         success: true,
         answer: generalResponse,
@@ -412,7 +417,7 @@ What would you like to know about Maharashtra's governance today?`,
       });
     }
 
-    const helpQueries = ['what can you do', 'what can u do', 'help', 'who are you', 'what is this', 'how to use', 'capabilities', 'features'];
+    const helpQueries = ['what can you do', 'help', 'who are you', 'how to use', 'capabilities', 'features'];
     if (helpQueries.some(hq => qClean.includes(hq))) {
       return res.json({
         success: true,
@@ -430,7 +435,7 @@ What would you like to know about Maharashtra's governance today?`,
 
 **Example queries:**
 • "Find GRs about farmer loan schemes"
-• "Who is the Agriculture Minister of Maharashtra?"
+• "What is the structure of Maharashtra government?"
 • "How to download forms from maharashtra.gov.in?"
 • "Tell me about the MahaDBT scholarship"
 
@@ -440,17 +445,22 @@ What can I help you with today?`,
       });
     }
 
-    // STEP 3: Use the AI Assistant for GR-specific queries
+    // STEP 3: Use the AI Assistant
     if (!assistant) {
       if (indexer) {
         assistant = new GRAssistant(indexer, process.env.GEMINI_API_KEY);
-        assistant.generalKnowledge = generalKnowledgeBase;
       } else {
-        return res.status(503).json({ error: 'GR Assistant Knowledge Base is initializing...' });
+        return res.status(503).json({ 
+          success: false,
+          error: 'GR Assistant Knowledge Base is initializing...',
+          answer: 'I am currently initializing. Please wait a moment and try again.',
+          matchingGRs: [],
+          source: 'error'
+        });
       }
     }
 
-    // Check if it's a GR-specific query (contains GR, resolution, sanction, etc.)
+    // Check if it's a GR-specific query
     const grKeywords = ['gr', 'resolution', 'sanction', 'order', 'notification', 'circular', 'policy', 'scheme', 'fund'];
     const isGRQuery = grKeywords.some(k => userQuery.toLowerCase().includes(k)) || 
                        userQuery.toLowerCase().includes('government resolution');
@@ -459,9 +469,9 @@ What can I help you with today?`,
       const result = await assistant.chat(userQuery);
       return res.json({
         success: true,
-        answer: result.answer,
+        answer: result.answer || 'No answer available',
         matchingGRs: result.matchingGRs || [],
-        source: 'gr_database'
+        source: result.source || 'gr_database'
       });
     }
 
@@ -469,9 +479,7 @@ What can I help you with today?`,
     try {
       const result = await assistant.chat(userQuery);
       
-      // Check if the result indicates no GR found
-      if (result.answer.includes('I do not know') || result.answer.includes('not present in the Government Resolution database')) {
-        // Try to provide general government information
+      if (result.answer && (result.answer.includes('I do not know') || result.answer.includes('not present in the Government Resolution database'))) {
         const generalInfo = getGeneralKnowledge(userQuery);
         if (generalInfo) {
           return res.json({
@@ -485,13 +493,12 @@ What can I help you with today?`,
       
       return res.json({
         success: true,
-        answer: result.answer,
+        answer: result.answer || 'No response available',
         matchingGRs: result.matchingGRs || [],
-        source: 'gr_database'
+        source: result.source || 'gr_database'
       });
     } catch (error) {
       console.error('Assistant error:', error);
-      // Final fallback
       return res.json({
         success: true,
         answer: `I'm not sure about that specific query. You can ask me about:
@@ -508,7 +515,13 @@ How can I help you with Maharashtra's governance?`,
     }
   } catch (error) {
     console.error('Error in AI Assistant chat endpoint:', error);
-    res.status(500).json({ error: 'Failed to process AI assistant search: ' + error.message });
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to process AI assistant search: ' + error.message,
+      answer: 'Sorry, I encountered an error. Please try again.',
+      matchingGRs: [],
+      source: 'error'
+    });
   }
 });
 
@@ -791,7 +804,6 @@ app.get('/api/gr/:grId/export/html', async (req, res) => {
       return res.status(404).send('<h1>Government Resolution Not Found</h1>');
     }
 
-    // Simple HTML export (you can expand this)
     const html = `
 <!DOCTYPE html>
 <html>
@@ -812,22 +824,41 @@ app.get('/api/gr/:grId/export/html', async (req, res) => {
   }
 });
 
+// Test endpoint
+app.get('/test', (req, res) => {
+  res.json({ 
+    status: 'ok',
+    message: 'Server is running!',
+    timestamp: new Date().toISOString(),
+    assistantReady: assistant !== null,
+    indexerReady: indexer !== null
+  });
+});
+
 // ============================================================
 // Start Server
 // ============================================================
 
 async function startServer() {
-  const initialized = await initializeBackend();
+  console.log('🚀 Starting server...');
+  
+  try {
+    const initialized = await initializeBackend();
 
-  if (initialized) {
-    app.listen(PORT, () => {
-      console.log(`\n🎉 Server running on http://localhost:${PORT}`);
-      console.log(`📊 Dashboard: http://localhost:5173`);
-      console.log(`🤖 AI Assistant: POST /api/assistant/chat`);
-      console.log(`📋 Try it: curl -X POST http://localhost:${PORT}/api/assistant/chat -H "Content-Type: application/json" -d '{"query":"What is the capital of Maharashtra?"}'`);
-    });
-  } else {
-    console.error('❌ Failed to initialize backend');
+    if (initialized) {
+      app.listen(PORT, () => {
+        console.log(`\n🎉 Server running on http://localhost:${PORT}`);
+        console.log(`📊 Dashboard: http://localhost:5173`);
+        console.log(`🤖 AI Assistant: POST /api/assistant/chat`);
+        console.log(`📋 Try it: curl -X POST http://localhost:${PORT}/api/assistant/chat -H "Content-Type: application/json" -d '{"query":"What is the capital of Maharashtra?"}'`);
+        console.log(`🔍 Test: http://localhost:${PORT}/test`);
+      });
+    } else {
+      console.error('❌ Failed to initialize backend');
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error('❌ Fatal error during startup:', error);
     process.exit(1);
   }
 }
