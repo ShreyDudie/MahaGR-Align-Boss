@@ -7,15 +7,18 @@ export default function ChatAssistant() {
   const [messages, setMessages] = useState([
     {
       sender: 'assistant',
-      text: 'Hello! I am your AI Policy Assistant for Maharashtra GRs.\n\n**Quick Overview:**\n• Search across 98,980+ Government Resolutions\n• Get short, simple, and direct bullet points\n• Click links below to view full GR documents',
-      matchingGRs: []
+      text: '🏛️ **Welcome to MahaGR AI Assistant!**\n\nI am your expert guide to **98,980+ Maharashtra Government Resolutions** and general government information.\n\n**What I can help you with:**\n• 📜 **Find GRs** - Search policies, schemes, and sanctions\n• 🏛️ **Government Info** - Departments, structure, and services\n• 🌐 **Website Guidance** - Official portals and downloads\n• 📋 **Scheme Details** - Eligibility, benefits, and applications\n\n**Try asking:**\n• "Find farmer loan scheme GRs"\n• "What is the structure of Maharashtra government?"\n• "How to download forms from maharashtra.gov.in?"\n• "Tell me about the Agriculture Department"',
+      matchingGRs: [],
+      source: 'welcome'
     }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedGRModal, setSelectedGRModal] = useState(null);
+  const [showSuggestions, setShowSuggestions] = useState(true);
 
   const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -24,6 +27,7 @@ export default function ChatAssistant() {
   useEffect(() => {
     if (isOpen) {
       scrollToBottom();
+      setTimeout(() => inputRef.current?.focus(), 300);
     }
   }, [messages, isOpen]);
 
@@ -35,16 +39,31 @@ export default function ChatAssistant() {
     setMessages(prev => [...prev, userMsg]);
     if (!queryText) setInputValue('');
     setLoading(true);
+    setShowSuggestions(false);
 
     try {
-      const response = await axios.post('http://localhost:5000/api/assistant/chat', { query: textToSend });
-      if (response.data.success) {
+      const response = await axios.post('http://localhost:5000/api/assistant/chat', { 
+        query: textToSend 
+      }, {
+        timeout: 35000 // Increased timeout
+      });
+      
+      const payload = response.data || {};
+      const answerText = payload.answer || payload.message || 'No response received. Please try again.';
+      const matchingGRs = Array.isArray(payload.matchingGRs)
+        ? payload.matchingGRs
+        : Array.isArray(payload.results)
+          ? payload.results
+          : [];
+      
+      if (payload.success || payload.answer || payload.message) {
         setMessages(prev => [
           ...prev,
           {
             sender: 'assistant',
-            text: response.data.answer,
-            matchingGRs: response.data.matchingGRs || []
+            text: answerText,
+            matchingGRs,
+            source: payload.source || 'gr_database'
           }
         ]);
       } else {
@@ -52,19 +71,33 @@ export default function ChatAssistant() {
           ...prev,
           {
             sender: 'assistant',
-            text: 'I encountered an issue querying the GR database. Please try again.',
-            matchingGRs: []
+            text: '⚠️ I encountered an issue processing your query. Please try rephrasing or ask about specific GR topics.',
+            matchingGRs: [],
+            source: 'error'
           }
         ]);
       }
     } catch (error) {
       console.error('Chat Assistant error:', error);
+      let errorMessage = 'Unable to connect to the GR AI search engine. Please ensure the backend server is running.';
+      
+      if (error.code === 'ECONNABORTED') {
+        errorMessage = '⏱️ The request timed out. Please try a more specific query or check your connection.';
+      } else if (error.response?.status === 429) {
+        errorMessage = '🔄 Too many requests. Please wait a moment and try again.';
+      } else if (error.response?.status === 503) {
+        errorMessage = '🔧 The AI assistant is currently initializing. Please wait a moment and try again.';
+      } else if (error.response?.status === 500) {
+        errorMessage = '⚠️ Server error. Please try again later.';
+      }
+      
       setMessages(prev => [
         ...prev,
         {
           sender: 'assistant',
-          text: 'Unable to connect to the GR AI search engine. Please ensure the backend server is running.',
-          matchingGRs: []
+          text: errorMessage,
+          matchingGRs: [],
+          source: 'error'
         }
       ]);
     } finally {
@@ -74,6 +107,7 @@ export default function ChatAssistant() {
 
   const handleOpenGR = async (grId) => {
     if (!grId) return;
+    setLoading(true);
     try {
       const res = await axios.get(`http://localhost:5000/api/gr/${encodeURIComponent(grId)}`);
       if (res.data.gr) {
@@ -83,17 +117,56 @@ export default function ChatAssistant() {
       }
     } catch (err) {
       alert(`Error loading GR ${grId}: ` + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const suggestions = [
-    'Was a GR launched for Lumpy Skin Disease?',
-    'Solar pump subsidy scheme rules',
-    'Primary school teacher recruitment',
-    'Finance Department sanction limits'
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  // Enhanced suggestions with categories
+  const suggestionCategories = [
+    {
+      label: '📜 GR Queries',
+      suggestions: [
+        'Find GRs about farmer loan schemes',
+        'Solar pump subsidy scheme rules',
+        'Primary school teacher recruitment',
+        'Finance Department sanction limits',
+        'Lumpy Skin Disease control GR'
+      ]
+    },
+    {
+      label: '🏛️ Government Info',
+      suggestions: [
+        'What is the structure of Maharashtra government?',
+        'Tell me about the Agriculture Department',
+        'Who is the Chief Minister of Maharashtra?',
+        'How many districts in Maharashtra?',
+        'What is the official language?'
+      ]
+    },
+    {
+      label: '🌐 Website Help',
+      suggestions: [
+        'How to download forms from maharashtra.gov.in?',
+        'What is MahaOnline portal?',
+        'How to check scholarship status online?',
+        'MSRTC bus booking website',
+        'How to apply for certificates online?'
+      ]
+    }
   ];
 
-  const formatTextWithBold = (rawText) => {
+  const formatText = (rawText) => {
+    if (!rawText) return null;
+    
+    // Handle bold text
     const parts = rawText.split(/(\*\*.*?\*\*)/g);
     return parts.map((part, i) => {
       if (part.startsWith('**') && part.endsWith('**')) {
@@ -103,8 +176,31 @@ export default function ChatAssistant() {
     });
   };
 
-  const renderMessageContent = (text, matchingGRs = []) => {
+  // Helper to get source display name
+  const getSourceDisplay = (source) => {
+    const sourceMap = {
+      'welcome': '👋 Welcome',
+      'help': '❓ Help',
+      'general_knowledge': '📚 General Knowledge',
+      'gr_database': '📜 GR Database',
+      'general_knowledge_fallback': '📚 General Knowledge (Fallback)',
+      'website': '🌐 Website Info',
+      'scholarship': '🎓 Scholarship Info',
+      'gemini': '🤖 AI (Gemini)',
+      'no_results': '🔍 No Results',
+      'fallback': '💡 Fallback',
+      'error': '⚠️ Error',
+      'greeting': '👋 Greeting',
+      'empty_query': '❓ Empty Query'
+    };
+    return sourceMap[source] || '🤖 AI Response';
+  };
+
+  const renderMessageContent = (text, matchingGRs = [], source = '') => {
+    if (!text) return <div className="chat-empty-message">No message content</div>;
+    
     const lines = text.split('\n');
+    const hasGRs = matchingGRs && matchingGRs.length > 0;
 
     return (
       <div className="chat-content-body">
@@ -112,52 +208,73 @@ export default function ChatAssistant() {
           const trimmed = line.trim();
           if (!trimmed) return null;
 
-          // Check if bullet item
-          const isBullet = trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.startsWith('* ');
-          if (isBullet) {
-            // Strip bullet character
-            const cleanContent = trimmed.replace(/^[•\-*]\s*/, '');
+          // Section headers (lines with ** at start and end)
+          if (trimmed.startsWith('**') && trimmed.endsWith('**') && trimmed.length > 4) {
             return (
-              <div key={idx} className="chat-bullet-item">
-                <span className="chat-bullet-dot">•</span>
-                <span className="chat-bullet-text">{formatTextWithBold(cleanContent)}</span>
+              <div key={idx} className="chat-section-header">
+                {formatText(trimmed)}
               </div>
             );
           }
 
-          // Check if section header or italic note
+          // Bullet points
+          const isBullet = trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.startsWith('* ');
+          if (isBullet) {
+            const cleanContent = trimmed.replace(/^[•\-*]\s*/, '');
+            return (
+              <div key={idx} className="chat-bullet-item">
+                <span className="chat-bullet-dot">•</span>
+                <span className="chat-bullet-text">{formatText(cleanContent)}</span>
+              </div>
+            );
+          }
+
+          // Italic notes
           const isItalicNote = trimmed.startsWith('*') && trimmed.endsWith('*') && !trimmed.startsWith('**');
 
           return (
             <p key={idx} className={`chat-line-p ${isItalicNote ? 'chat-italic-note' : ''}`}>
-              {formatTextWithBold(line)}
+              {formatText(line)}
             </p>
           );
         })}
 
+        {/* Source badge */}
+        {source && source !== 'welcome' && source !== 'greeting' && (
+          <div className="chat-source-badge">
+            <span className="source-dot"></span>
+            {getSourceDisplay(source)}
+          </div>
+        )}
+
         {/* Clickable GR link badges */}
-        {matchingGRs && matchingGRs.length > 0 && (
+        {hasGRs && (
           <div className="chat-gr-links-section">
             <div className="chat-gr-links-header">
-              📄 Official Document Link{matchingGRs.length > 1 ? 's' : ''} (Click to View Full Text):
+              📄 {matchingGRs.length > 1 ? `Found ${matchingGRs.length} Related GRs` : 'Related GR Document'}
             </div>
             <div className="chat-gr-links-list">
-              {matchingGRs.slice(0, 3).map((gr, i) => (
+              {matchingGRs.slice(0, 4).map((gr, i) => (
                 <button
                   key={i}
                   className="chat-gr-link-btn"
                   onClick={() => handleOpenGR(gr.id)}
-                  title={`View full GR document for ${gr.id}`}
+                  title={`View full GR document: ${gr.id}`}
                 >
+                  <span className="gr-btn-icon">📄</span>
                   <span className="gr-btn-label">
-                    🔗 <strong>GR {gr.id}</strong> — {gr.department}
+                    <strong>{gr.id}</strong>
+                    <span className="gr-btn-dept">{gr.department || 'General'}</span>
                   </span>
-                  <span className="gr-btn-action">
-                    View Full GR →
-                  </span>
+                  <span className="gr-btn-action">View →</span>
                 </button>
               ))}
             </div>
+            {matchingGRs.length > 4 && (
+              <div className="chat-gr-more">
+                +{matchingGRs.length - 4} more GRs available
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -177,8 +294,12 @@ export default function ChatAssistant() {
             <div className="chat-btn-icon">🤖</div>
             <div className="chat-btn-text">
               <span className="title">AI Policy Assistant</span>
-              <span className="status"><span className="online-dot"></span>98k GR Database</span>
+              <span className="status">
+                <span className="online-dot"></span>
+                98k GR Database
+              </span>
             </div>
+            <div className="chat-btn-badge">● Live</div>
           </button>
         ) : null}
       </div>
@@ -191,26 +312,59 @@ export default function ChatAssistant() {
               <div className="assistant-avatar">🏛️</div>
               <div>
                 <h4>MahaGR AI Assistant</h4>
-                <p><span className="online-dot"></span>98,980 Maharashtra GRs Knowledge Base</p>
+                <p>
+                  <span className="online-dot"></span>
+                  98,980 GRs • General Government Knowledge
+                </p>
               </div>
             </div>
             <div className="header-actions">
-              <button onClick={() => setIsOpen(false)} title="Close Chat">✕</button>
+              <button 
+                className="header-btn" 
+                onClick={() => {
+                  setMessages([messages[0]]);
+                  setShowSuggestions(true);
+                  setInputValue('');
+                }}
+                title="Reset Chat"
+              >
+                ↺
+              </button>
+              <button 
+                className="header-btn close-btn" 
+                onClick={() => setIsOpen(false)} 
+                title="Close Chat"
+              >
+                ✕
+              </button>
             </div>
           </div>
 
           {/* Quick Suggestion Chips */}
-          <div className="suggestions-bar">
-            {suggestions.map((sugg, idx) => (
+          {showSuggestions && messages.length <= 2 && (
+            <div className="suggestions-bar">
+              <div className="suggestions-scroll">
+                {suggestionCategories.flatMap(cat => 
+                  cat.suggestions.map((sugg, idx) => (
+                    <button 
+                      key={`${cat.label}-${idx}`} 
+                      className="chip"
+                      onClick={() => handleSend(sugg)}
+                    >
+                      {sugg.length > 40 ? sugg.substring(0, 40) + '...' : sugg}
+                    </button>
+                  ))
+                )}
+              </div>
               <button 
-                key={idx} 
-                className="chip"
-                onClick={() => handleSend(sugg)}
+                className="suggestions-toggle"
+                onClick={() => setShowSuggestions(false)}
+                title="Hide suggestions"
               >
-                {sugg}
+                ✕
               </button>
-            ))}
-          </div>
+            </div>
+          )}
 
           {/* Chat Messages Log */}
           <div className="chat-messages-log">
@@ -220,7 +374,7 @@ export default function ChatAssistant() {
                   {msg.sender === 'assistant' ? '🤖' : '👤'}
                 </div>
                 <div className="message-bubble">
-                  {renderMessageContent(msg.text, msg.matchingGRs)}
+                  {renderMessageContent(msg.text, msg.matchingGRs, msg.source)}
                 </div>
               </div>
             ))}
@@ -232,7 +386,9 @@ export default function ChatAssistant() {
                   <div className="typing-dots">
                     <span></span><span></span><span></span>
                   </div>
-                  <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>Searching 98,000+ GR database...</span>
+                  <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>
+                    Searching 98,000+ GR database...
+                  </span>
                 </div>
               </div>
             )}
@@ -241,157 +397,188 @@ export default function ChatAssistant() {
 
           {/* Chat Input Bar */}
           <div className="chat-input-container">
-            <input
-              type="text"
-              placeholder="Ask about any GR topic (e.g. lumpy skin, solar pumps...)"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            />
-            <button 
-              onClick={() => handleSend()}
-              disabled={!inputValue.trim() || loading}
-            >
-              ➔
-            </button>
+            <div className="chat-input-wrapper">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Ask about GRs, government, schemes, or websites..."
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={loading}
+                className="chat-input-field"
+              />
+              <button 
+                className="chat-send-btn"
+                onClick={() => handleSend()}
+                disabled={!inputValue.trim() || loading}
+              >
+                {loading ? '⏳' : '➔'}
+              </button>
+            </div>
+            <div className="chat-input-footer">
+              <span className="input-hint">Press Enter to send</span>
+              <span className="input-status">
+                {loading ? '⏳ Processing...' : '🟢 Ready'}
+              </span>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Full GR Resolution Modal */}
+      {/* Full GR Resolution Modal - Enhanced */}
       {selectedGRModal && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.6)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1200,
-          backdropFilter: 'blur(4px)'
-        }} onClick={() => setSelectedGRModal(null)}>
-          <div className="modal-content" style={{
-            background: 'white',
-            borderRadius: '8px',
-            width: '90%',
-            maxWidth: '800px',
-            maxHeight: '85vh',
-            display: 'flex',
-            flexDirection: 'column',
-            boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-            textAlign: 'left'
-          }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header" style={{
-              padding: '16px 24px',
-              borderBottom: '1px solid #e2e8f0',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              background: '#0f172a',
-              color: 'white'
-            }}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700' }}>
-                🔗 GR Document: {selectedGRModal.metadata?.grNumber || selectedGRModal.id}
-              </h3>
-              <button 
-                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'white' }} 
-                onClick={() => setSelectedGRModal(null)}
-              >
-                ×
-              </button>
+        <div className="modal-overlay" onClick={() => setSelectedGRModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-header-left">
+                <span className="modal-icon">📄</span>
+                <h3>
+                  GR Document: {selectedGRModal.metadata?.grNumber || selectedGRModal.id}
+                </h3>
+              </div>
+              <div className="modal-header-actions">
+                <button 
+                  className="modal-action-btn"
+                  onClick={() => window.open(`http://localhost:5000/api/gr/${selectedGRModal.id}/export/html`, '_blank')}
+                  title="Open PDF View"
+                >
+                  🖨️ PDF
+                </button>
+                <button 
+                  className="modal-close-btn"
+                  onClick={() => setSelectedGRModal(null)}
+                >
+                  ×
+                </button>
+              </div>
             </div>
 
-            <div className="modal-body" style={{ padding: '24px', overflowY: 'auto', flex: 1, background: '#f8fafc' }}>
-              <div style={{
-                background: 'white',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                padding: '30px',
-                fontFamily: 'Georgia, serif',
-                lineHeight: '1.6',
-                color: '#1e293b',
-                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
-              }}>
-                <div style={{ textAlign: 'center', borderBottom: '2px double #475569', paddingBottom: '15px', marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', marginBottom: '8px' }}>
-                    <img src="/emblem_india_maharashtra.png" style={{ height: '50px' }} alt="State Emblem" />
-                    <img src="/maharashtra_rajmudra_seal.png" style={{ height: '50px' }} alt="Rajmudra Seal" />
+            <div className="modal-body">
+              <div className="modal-gr-content">
+                <div className="gr-header">
+                  <div className="gr-emblem">
+                    <span>🏛️</span>
+                    <span>🏛️</span>
                   </div>
-                  <h2 style={{ fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', margin: '4px 0', color: '#0f172a' }}>Government of Maharashtra</h2>
-                  <h3 style={{ fontSize: '15px', fontWeight: '500', margin: '2px 0', color: '#334155' }}>{selectedGRModal.department || 'Department of Administration'}</h3>
-                  <h4 style={{ fontSize: '13px', fontWeight: 'normal', margin: '2px 0', color: '#64748b' }}>Mantralaya, Mumbai - 400032</h4>
+                  <h2>Government of Maharashtra</h2>
+                  <h3>{selectedGRModal.department || 'Department of Administration'}</h3>
+                  <h4>Mantralaya, Mumbai - 400032</h4>
                 </div>
 
-                <table style={{ width: '100%', marginBottom: '20px', fontSize: '13px', borderCollapse: 'collapse' }}>
+                <table className="gr-meta-table">
                   <tbody>
                     <tr>
-                      <td style={{ fontWeight: 'bold', width: '130px', padding: '4px 0' }}>Resolution No:</td>
-                      <td style={{ padding: '4px 0' }}><strong>{selectedGRModal.metadata?.grNumber || selectedGRModal.id}</strong></td>
+                      <td className="meta-label">Resolution No:</td>
+                      <td><strong>{selectedGRModal.metadata?.grNumber || selectedGRModal.id}</strong></td>
                     </tr>
                     <tr>
-                      <td style={{ fontWeight: 'bold', padding: '4px 0' }}>Date:</td>
-                      <td style={{ padding: '4px 0' }}>{selectedGRModal.metadata?.date || 'N/A'}</td>
+                      <td className="meta-label">Date:</td>
+                      <td>{selectedGRModal.metadata?.date || 'N/A'}</td>
                     </tr>
                     <tr>
-                      <td style={{ fontWeight: 'bold', padding: '4px 0' }}>Subject:</td>
-                      <td style={{ padding: '4px 0' }}><strong>{selectedGRModal.metadata?.subject}</strong></td>
+                      <td className="meta-label">Subject:</td>
+                      <td><strong>{selectedGRModal.metadata?.subject || 'Government Resolution'}</strong></td>
                     </tr>
+                    {selectedGRModal.metadata?.intentType && (
+                      <tr>
+                        <td className="meta-label">Type:</td>
+                        <td>{selectedGRModal.metadata.intentType}</td>
+                      </tr>
+                    )}
+                    {selectedGRModal.districts && selectedGRModal.districts.length > 0 && (
+                      <tr>
+                        <td className="meta-label">Districts:</td>
+                        <td>{selectedGRModal.districts.join(', ')}</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
 
-                {selectedGRModal.sections?.introduction && (
-                  <div style={{ marginBottom: '20px' }}>
-                    <h5 style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px', textTransform: 'uppercase', margin: '15px 0 8px 0', color: '#0f172a' }}>Preamble</h5>
-                    <p style={{ fontSize: '13.5px', textIndent: '30px', margin: 0, textAlign: 'justify' }}>{selectedGRModal.sections.introduction}</p>
+                {selectedGRModal.sections?.preamble_english && (
+                  <div className="gr-section">
+                    <h5>📜 Preamble</h5>
+                    <p>{selectedGRModal.sections.preamble_english}</p>
                   </div>
                 )}
 
-                <div style={{ marginBottom: '20px' }}>
-                  <h5 style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px', textTransform: 'uppercase', margin: '15px 0 8px 0', color: '#0f172a' }}>Government Resolution</h5>
+                {selectedGRModal.sections?.introduction && (
+                  <div className="gr-section">
+                    <h5>📋 Introduction</h5>
+                    <p>{selectedGRModal.sections.introduction}</p>
+                  </div>
+                )}
+
+                <div className="gr-section">
+                  <h5>⚖️ Government Resolution</h5>
                   {selectedGRModal.sections?.resolutions && selectedGRModal.sections.resolutions.length > 0 ? (
                     selectedGRModal.sections.resolutions.map((clause, idx) => (
-                      <p key={idx} style={{ fontSize: '13.5px', textIndent: '30px', margin: '0 0 10px 0', textAlign: 'justify', whiteSpace: 'pre-wrap' }}>
-                        {clause.index}. {clause.text}
+                      <p key={idx} className="gr-clause">
+                        <span className="clause-number">{clause.index}.</span>
+                        {clause.text}
                       </p>
                     ))
                   ) : (
-                    <p style={{ fontSize: '13.5px', textIndent: '30px', margin: 0 }}>{selectedGRModal.sections?.resolution || 'The Government hereby accords formal approval.'}</p>
+                    <p>{selectedGRModal.sections?.resolution || 'The Government hereby accords formal approval.'}</p>
                   )}
                 </div>
 
                 {selectedGRModal.sections?.financials && selectedGRModal.sections.financials.length > 0 && (
-                  <div style={{ marginBottom: '20px' }}>
-                    <h5 style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #cbd5e1', paddingBottom: '3px', textTransform: 'uppercase', margin: '15px 0 8px 0', color: '#0f172a' }}>Financial Details</h5>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                  <div className="gr-section">
+                    <h5>💰 Financial Details</h5>
+                    <table className="gr-financial-table">
                       <thead>
-                        <tr style={{ background: '#f1f5f9' }}>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '6px' }}>Description</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '6px' }}>Account Head</th>
-                          <th style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'right' }}>Amount (₹)</th>
+                        <tr>
+                          <th>Description</th>
+                          <th>Account Head</th>
+                          <th className="amount-col">Amount (₹)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {selectedGRModal.sections.financials.map((fin, idx) => (
                           <tr key={idx}>
-                            <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>{fin.description || 'Budget allocation'}</td>
-                            <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}><code>{fin.accountHead || 'N/A'}</code></td>
-                            <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'right', fontWeight: 'bold' }}>₹{fin.amount || fin.amountNumeric}</td>
+                            <td>{fin.description || 'Budget allocation'}</td>
+                            <td><code>{fin.accountHead || 'N/A'}</code></td>
+                            <td className="amount-col">
+                              ₹{(fin.amount || fin.amountNumeric || 0).toLocaleString('en-IN')}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
+
+                {selectedGRModal.sections?.distribution && selectedGRModal.sections.distribution.length > 0 && (
+                  <div className="gr-section">
+                    <h5>📤 Distribution</h5>
+                    <ol className="gr-distribution-list">
+                      {selectedGRModal.sections.distribution.map((dist, idx) => (
+                        <li key={idx}>{dist.recipient}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {selectedGRModal.sections?.footer_distribution_text && (
+                  <div className="gr-section">
+                    <h5>📎 Additional Distribution</h5>
+                    <pre className="gr-distribution-text">{selectedGRModal.sections.footer_distribution_text}</pre>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div style={{ padding: '12px 24px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', background: '#f1f5f9' }}>
+            <div className="modal-footer">
               <button 
+                className="modal-close-footer-btn"
+                onClick={() => setSelectedGRModal(null)}
+              >
+                Close
+              </button>
+              <button 
+                className="modal-pdf-btn"
                 onClick={() => window.open(`http://localhost:5000/api/gr/${selectedGRModal.id}/export/html`, '_blank')}
-                style={{ backgroundColor: '#1e3a8a', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
               >
                 🖨️ Open Full PDF View
               </button>

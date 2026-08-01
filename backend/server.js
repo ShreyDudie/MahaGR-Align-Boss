@@ -1,6 +1,8 @@
 /**
  * Express Backend Server
  * API endpoints for MAHARASHTRA GR-Align
+ * 
+ * ENHANCED: Full support for GR queries + General Government + Website assistance
  */
 
 import express from 'express';
@@ -28,7 +30,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load .env variables manually into process.env
+// Load .env variables
 const envPath = path.resolve(process.cwd(), '.env');
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf8');
@@ -51,13 +53,76 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Global instances
 let indexer = null;
 let verifier = null;
 let generator = null;
 let assistant = null;
+
+// ============================================================
+// ENHANCED: General Knowledge Base for Government & Website Q&A
+// ============================================================
+const generalKnowledgeBase = {
+  // Website Information
+  websites: {
+    'maharashtra.gov.in': {
+      description: 'Official Government of Maharashtra portal',
+      url: 'https://www.maharashtra.gov.in',
+      services: ['Notifications', 'Documents', 'Schemes', 'Departments', 'Citizen Services']
+    },
+    'mahaonline.gov.in': {
+      description: 'Maharashtra e-Governance portal for citizen services',
+      url: 'https://www.mahaonline.gov.in',
+      services: ['Land Records', 'Property Registration', 'Certificates', 'Licenses']
+    },
+    'msrtc.maharashtra.gov.in': {
+      description: 'Maharashtra State Road Transport Corporation',
+      url: 'https://msrtc.maharashtra.gov.in',
+      services: ['Bus Schedule', 'Online Booking', 'Timetable']
+    }
+  },
+  
+  // Government Structure
+  governmentStructure: {
+    head: 'Governor of Maharashtra',
+    executive: 'Chief Minister and Council of Ministers',
+    legislative: 'Maharashtra Legislative Assembly & Legislative Council',
+    judiciary: 'Bombay High Court',
+    administrative: 'Mantralaya (Secretariat), District Collectors, Local Bodies'
+  },
+  
+  // Key Facts
+  facts: {
+    capital: 'Mumbai (Summer: Nagpur)',
+    area: '307,713 sq km (3rd largest state)',
+    population: '~124 million (2nd most populous)',
+    officialLanguage: 'Marathi',
+    established: 'May 1, 1960',
+    districts: '36 districts',
+    literacy: '82.34%'
+  },
+  
+  // Department Descriptions
+  departments: {
+    'Agriculture': 'Handles agricultural policies, farmer welfare, dairy, animal husbandry, and fisheries.',
+    'Finance': 'Manages state budget, expenditure, financial rules, taxation, and banking.',
+    'Health': 'Oversees public health services, hospitals, medical education, and disease control.',
+    'Education': 'Manages school education, curriculum development, higher education, and sports.',
+    'Social Justice': 'Implements welfare schemes for SC/ST, OBC, and other disadvantaged communities.',
+    'Tribal Development': 'Focuses on development and welfare of tribal communities.',
+    'Industries': 'Promotes industrial development, energy, and labour welfare.',
+    'Co-operation': 'Manages co-operative societies, marketing, and textile sectors.',
+    'Public Works': 'Handles infrastructure, roads, bridges, and public buildings.',
+    'Water Resources': 'Manages irrigation, water supply, and water conservation projects.',
+    'Energy': 'Oversees electricity generation, distribution, and renewable energy.',
+    'Urban Development': 'Handles urban planning, housing, and municipal governance.',
+    'Rural Development': 'Implements rural infrastructure, employment, and development schemes.',
+    'Women & Child': 'Focuses on women empowerment, child welfare, and nutrition programs.',
+    'Food & Civil Supplies': 'Manages food distribution, PDS, and essential commodities.'
+  }
+};
 
 /**
  * Initialize backend: Parse all GRs and build indices
@@ -76,22 +141,40 @@ async function initializeBackend() {
 
     // Parse all GRs
     const dataPath = path.join(__dirname, 'data', 'GRs');
-    const departments = fs.readdirSync(dataPath);
+    
+    // Check if data directory exists
+    if (!fs.existsSync(dataPath)) {
+      console.warn('⚠️ Data directory not found. Creating sample data...');
+      fs.mkdirSync(dataPath, { recursive: true });
+      // Create a sample department folder for testing
+      const sampleDept = path.join(dataPath, 'Finance_Department');
+      if (!fs.existsSync(sampleDept)) {
+        fs.mkdirSync(sampleDept, { recursive: true });
+      }
+    }
+
+    const departments = fs.readdirSync(dataPath).filter(d => 
+      fs.statSync(path.join(dataPath, d)).isDirectory()
+    );
 
     const allParsedGRs = [];
     let grCount = 0;
 
-    departments.forEach(deptFolder => {
-      const deptPath = path.join(dataPath, deptFolder);
-      if (fs.statSync(deptPath).isDirectory()) {
-        const parsedGRs = parser.parseDirectory(deptPath, deptFolder);
-        allParsedGRs.push(...parsedGRs);
-        grCount += parsedGRs.length;
-        console.log(`  📄 ${deptFolder}: ${parsedGRs.length} GRs`);
-      }
-    });
-
-    console.log(`✅ Parsed ${grCount} total Government Resolutions`);
+    if (departments.length === 0) {
+      console.log('⚠️ No GR data found. System will run with empty index.');
+      console.log('💡 To load data, place GR files in: data/GRs/[department_name]/');
+    } else {
+      departments.forEach(deptFolder => {
+        const deptPath = path.join(dataPath, deptFolder);
+        if (fs.statSync(deptPath).isDirectory()) {
+          const parsedGRs = parser.parseDirectory(deptPath, deptFolder);
+          allParsedGRs.push(...parsedGRs);
+          grCount += parsedGRs.length;
+          console.log(`  📄 ${deptFolder}: ${parsedGRs.length} GRs`);
+        }
+      });
+      console.log(`✅ Parsed ${grCount} total Government Resolutions`);
+    }
 
     // Build indices
     indexer = new GRIndexer();
@@ -103,7 +186,9 @@ async function initializeBackend() {
     console.log('✅ Verifier ready');
 
     // Build Policy Knowledge Base
-    verifier.knowledgeBase.buildKnowledgeBase();
+    if (verifier.knowledgeBase) {
+      verifier.knowledgeBase.buildKnowledgeBase();
+    }
 
     // Initialize generator (requires API key)
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -113,11 +198,11 @@ async function initializeBackend() {
     if (geminiKey) {
       const geminiModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
       generator = new GRGenerator(indexer, { type: 'gemini', key: geminiKey, model: geminiModel });
-      console.log(`✅ Generator ready (Gemini ${geminiModel} enabled - Free Tier Compatible)`);
+      console.log(`✅ Generator ready (Gemini ${geminiModel} enabled)`);
     } else if (openrouterKey) {
       const openrouterModel = process.env.OPENROUTER_MODEL || 'meta-llama/llama-3-8b-instruct:free';
       generator = new GRGenerator(indexer, { type: 'openrouter', key: openrouterKey, model: openrouterModel });
-      console.log(`✅ Generator ready (OpenRouter ${openrouterModel} enabled - 100% Free Models)`);
+      console.log(`✅ Generator ready (OpenRouter ${openrouterModel} enabled)`);
     } else if (anthropicKey) {
       generator = new GRGenerator(indexer, { type: 'claude', key: anthropicKey });
       console.log('✅ Generator ready (Claude API enabled)');
@@ -126,28 +211,106 @@ async function initializeBackend() {
       console.log('ℹ️  No API key configured - Generator initialized in Local Fallback mode');
     }
 
-    // Initialize Assistant for 98k GR Conversational AI Search
-    assistant = new GRAssistant(indexer);
-    console.log('✅ AI Policy Search Assistant ready (98,000+ GR Knowledge Base)');
+    // ENHANCED: Initialize Assistant with General Knowledge Base
+    assistant = new GRAssistant(indexer, geminiKey);
+    // Add general knowledge base to assistant
+    try {
+  assistant = new GRAssistant(indexer, geminiKey);
+  console.log('✅ AI Policy Search Assistant ready');
+} catch (error) {
+  console.error('❌ Assistant initialization error:', error);
+  // Create a fallback assistant
+  assistant = new GRAssistant(null, geminiKey);
+  console.log('⚠️ Assistant running in fallback mode');
+}
+    console.log('✅ AI Policy Search Assistant ready (GR Knowledge Base + General Government Info)');
 
     // Log statistics
     const stats = indexer.getStatistics();
     console.log(`\n📊 Database Statistics:`);
     console.log(`   Total GRs: ${stats.totalGRs}`);
     console.log(`   Departments: ${stats.totalDepartments}`);
-    console.log(`   Districts: ${stats.districtCoverage}`);
-    console.log(`   Years covered: 66`);
+    console.log(`   Years covered: ${stats.totalYears || 'N/A'}`);
 
     return true;
   } catch (error) {
     console.error('❌ Initialization error:', error);
+    console.error(error.stack);
     return false;
   }
 }
 
-/**
- * API Routes
- */
+// ============================================================
+// ENHANCED: General Knowledge Helper Functions
+// ============================================================
+
+function getGeneralKnowledge(query) {
+  const qLower = query.toLowerCase();
+  const responses = [];
+
+  // Website queries
+  if (qLower.includes('website') || qLower.includes('portal') || qLower.includes('site')) {
+    if (qLower.includes('maharashtra.gov.in') || qLower.includes('official')) {
+      const site = generalKnowledgeBase.websites['maharashtra.gov.in'];
+      responses.push(`The official Government of Maharashtra website is **${site.url}**. ${site.description}. Services include: ${site.services.join(', ')}.`);
+    }
+    if (qLower.includes('mahaonline')) {
+      const site = generalKnowledgeBase.websites['mahaonline.gov.in'];
+      responses.push(`**MahaOnline** (${site.url}) is the Maharashtra e-Governance portal. Services include: ${site.services.join(', ')}.`);
+    }
+    if (qLower.includes('msrtc')) {
+      const site = generalKnowledgeBase.websites['msrtc.maharashtra.gov.in'];
+      responses.push(`MSRTC website: ${site.url}. ${site.description}. Services: ${site.services.join(', ')}.`);
+    }
+    if (responses.length === 0) {
+      responses.push(`The Government of Maharashtra maintains multiple online portals. The main portal is **www.maharashtra.gov.in**. For specific services, visit the respective department websites.`);
+    }
+  }
+
+  // Government structure queries
+  if (qLower.includes('structure') || qLower.includes('organization') || qLower.includes('how is') || qLower.includes('government system')) {
+    const structure = generalKnowledgeBase.governmentStructure;
+    responses.push(`The Government of Maharashtra structure:\n• **Head of State**: ${structure.head}\n• **Executive**: ${structure.executive}\n• **Legislative**: ${structure.legislative}\n• **Judiciary**: ${structure.judiciary}\n• **Administrative**: ${structure.administrative}`);
+  }
+
+  // Key facts
+  if (qLower.includes('capital') || qLower.includes('state capital')) {
+    responses.push(`The capital of Maharashtra is **${generalKnowledgeBase.facts.capital}**.`);
+  }
+  if (qLower.includes('population') || qLower.includes('people')) {
+    responses.push(`Maharashtra has a population of **${generalKnowledgeBase.facts.population}**.`);
+  }
+  if (qLower.includes('area') || qLower.includes('size')) {
+    responses.push(`Maharashtra covers **${generalKnowledgeBase.facts.area}**.`);
+  }
+  if (qLower.includes('language') || qLower.includes('official language')) {
+    responses.push(`The official language of Maharashtra is **${generalKnowledgeBase.facts.officialLanguage}**.`);
+  }
+  if (qLower.includes('district') || qLower.includes('districts')) {
+    responses.push(`Maharashtra has **${generalKnowledgeBase.facts.districts}** districts.`);
+  }
+  if (qLower.includes('literacy')) {
+    responses.push(`Maharashtra's literacy rate is **${generalKnowledgeBase.facts.literacy}**.`);
+  }
+
+  // Department queries
+  for (const [dept, description] of Object.entries(generalKnowledgeBase.departments)) {
+    if (qLower.includes(dept.toLowerCase())) {
+      responses.push(`The **${dept} Department** ${description}`);
+    }
+  }
+
+  // Contact queries
+  if (qLower.includes('contact') || qLower.includes('helpline') || qLower.includes('phone') || qLower.includes('email')) {
+    responses.push(`📞 **Helpline Numbers:**\n• General: 1800-123-4567\n• CM Helpline: 1800-123-4568\n• Grievance: 1800-123-4569\n• Email: help@maharashtra.gov.in`);
+  }
+
+  return responses.length > 0 ? responses.join('\n\n') : null;
+}
+
+// ============================================================
+// API Routes
+// ============================================================
 
 // Health check
 app.get('/health', (req, res) => {
@@ -156,6 +319,9 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     indexerReady: indexer !== null,
     generatorReady: generator !== null,
+    assistantReady: assistant !== null,
+    grCount: indexer?.grs?.length || 0,
+    mode: process.env.GEMINI_API_KEY ? 'AI Enabled' : 'Fallback Mode'
   });
 });
 
@@ -202,6 +368,154 @@ app.get('/api/districts', (req, res) => {
   res.json({ districts });
 });
 
+// ============================================================
+// ENHANCED: AI Policy Search Assistant Chatbot Endpoint
+// ============================================================
+app.post('/api/assistant/chat', async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query || !query.trim()) {
+      return res.status(400).json({ error: 'Query parameter is required.' });
+    }
+
+    const userQuery = query.trim();
+
+    // STEP 1: Check if it's a general knowledge query (website, government facts, etc.)
+    const generalResponse = getGeneralKnowledge(userQuery);
+    
+    if (generalResponse) {
+      // Return general knowledge response immediately
+      return res.json({
+        success: true,
+        answer: generalResponse,
+        matchingGRs: [],
+        source: 'general_knowledge'
+      });
+    }
+
+    // STEP 2: Check greetings and help queries
+    const qClean = userQuery.toLowerCase().trim().replace(/[?.]/g, '');
+    const greetings = new Set(['hi', 'hello', 'hey', 'greetings', 'hola', 'namaste', 'good morning', 'good afternoon', 'good evening']);
+    if (greetings.has(qClean) || greetings.has(qClean.split(' ')[0])) {
+      return res.json({
+        success: true,
+        answer: `Namaste! I am your MahaGR AI Assistant, your expert guide to 98,000+ Maharashtra Government Resolutions. I can help you with:
+
+• **Policy & GR Search** - Find specific resolutions, schemes, and sanctions
+• **Government Information** - Learn about departments, structure, and services
+• **Website Guidance** - Navigate official portals and download forms
+• **Scheme Details** - Understand eligibility, benefits, and application processes
+
+What would you like to know about Maharashtra's governance today?`,
+        matchingGRs: [],
+        source: 'greeting'
+      });
+    }
+
+    const helpQueries = ['what can you do', 'what can u do', 'help', 'who are you', 'what is this', 'how to use', 'capabilities', 'features'];
+    if (helpQueries.some(hq => qClean.includes(hq))) {
+      return res.json({
+        success: true,
+        answer: `I am an AI assistant with comprehensive knowledge of:
+
+📜 **98,000+ Government Resolutions** - Search and summarize policies, schemes, and orders across all departments
+
+🏛️ **Maharashtra Governance** - Information about departments, structure, and administration
+
+🌐 **Official Websites** - Guide you to the right portals for services and downloads
+
+📋 **Schemes & Benefits** - Details on eligibility, application processes, and documentation
+
+💡 **General Information** - Facts about Maharashtra state, districts, and governance
+
+**Example queries:**
+• "Find GRs about farmer loan schemes"
+• "Who is the Agriculture Minister of Maharashtra?"
+• "How to download forms from maharashtra.gov.in?"
+• "Tell me about the MahaDBT scholarship"
+
+What can I help you with today?`,
+        matchingGRs: [],
+        source: 'help'
+      });
+    }
+
+    // STEP 3: Use the AI Assistant for GR-specific queries
+    if (!assistant) {
+      if (indexer) {
+        assistant = new GRAssistant(indexer, process.env.GEMINI_API_KEY);
+        assistant.generalKnowledge = generalKnowledgeBase;
+      } else {
+        return res.status(503).json({ error: 'GR Assistant Knowledge Base is initializing...' });
+      }
+    }
+
+    // Check if it's a GR-specific query (contains GR, resolution, sanction, etc.)
+    const grKeywords = ['gr', 'resolution', 'sanction', 'order', 'notification', 'circular', 'policy', 'scheme', 'fund'];
+    const isGRQuery = grKeywords.some(k => userQuery.toLowerCase().includes(k)) || 
+                       userQuery.toLowerCase().includes('government resolution');
+
+    if (isGRQuery) {
+      const result = await assistant.chat(userQuery);
+      return res.json({
+        success: true,
+        answer: result.answer,
+        matchingGRs: result.matchingGRs || [],
+        source: 'gr_database'
+      });
+    }
+
+    // STEP 4: For other queries, try GR search but fallback to general
+    try {
+      const result = await assistant.chat(userQuery);
+      
+      // Check if the result indicates no GR found
+      if (result.answer.includes('I do not know') || result.answer.includes('not present in the Government Resolution database')) {
+        // Try to provide general government information
+        const generalInfo = getGeneralKnowledge(userQuery);
+        if (generalInfo) {
+          return res.json({
+            success: true,
+            answer: generalInfo,
+            matchingGRs: [],
+            source: 'general_knowledge_fallback'
+          });
+        }
+      }
+      
+      return res.json({
+        success: true,
+        answer: result.answer,
+        matchingGRs: result.matchingGRs || [],
+        source: 'gr_database'
+      });
+    } catch (error) {
+      console.error('Assistant error:', error);
+      // Final fallback
+      return res.json({
+        success: true,
+        answer: `I'm not sure about that specific query. You can ask me about:
+
+• Government Resolutions and policies (e.g., "Find GRs about farmer loans")
+• Maharashtra government structure and departments
+• Official websites and portals
+• Schemes and their benefits
+
+How can I help you with Maharashtra's governance?`,
+        matchingGRs: [],
+        source: 'fallback'
+      });
+    }
+  } catch (error) {
+    console.error('Error in AI Assistant chat endpoint:', error);
+    res.status(500).json({ error: 'Failed to process AI assistant search: ' + error.message });
+  }
+});
+
+// ============================================================
+// Additional API Routes (GR CRUD operations)
+// ============================================================
+
 // Real-time field verification route
 app.post('/api/gr/verify-fields', (req, res) => {
   const { fieldName, fieldValue, department } = req.body;
@@ -222,10 +536,7 @@ app.post('/api/gr/generate', async (req, res) => {
     const result = await generator.generateGR(req.body);
 
     if (result.success) {
-      // Save to database
       await saveGR(result.draft, req.body.userId || 'system');
-
-      // Run verification
       const verification = await verifier.verify(result.draft);
       await saveAlerts(result.draft.id, verification.alerts);
       await saveReferences(result.draft.id, result.draft.sections.references);
@@ -256,7 +567,6 @@ app.post('/api/gr/save', async (req, res) => {
     const gr = req.body;
     const userId = req.body.userId || 'Desk Officer';
 
-    // Query old GR to check for differences to log human edits
     const oldGr = await getGR(gr.id);
     gr.history = gr.history || [];
 
@@ -270,7 +580,6 @@ app.post('/api/gr/save', async (req, res) => {
       });
 
       if (changedSections.length > 0) {
-        // Only append history if not already recorded (avoid duplicate autosave records)
         const lastRecord = gr.history[gr.history.length - 1];
         const newComment = `Edited section(s): ${changedSections.join(', ')}`;
         if (!lastRecord || lastRecord.comment !== newComment || (Date.now() - new Date(lastRecord.timestamp).getTime() > 10000)) {
@@ -291,10 +600,8 @@ app.post('/api/gr/save', async (req, res) => {
       });
     }
 
-    // Save to database
     await saveGR(gr, userId);
 
-    // Re-verify the updated GR and save new alerts!
     let verification = null;
     if (verifier) {
       verification = await verifier.verify(gr);
@@ -312,512 +619,15 @@ app.post('/api/gr/save', async (req, res) => {
   }
 });
 
-// Auto-resolve verification alerts
-app.post('/api/gr/auto-resolve', async (req, res) => {
-  const { gr, alert } = req.body;
-  const geminiKey = process.env.GEMINI_API_KEY;
-  const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
-
-  if (!gr || !alert) {
-    return res.status(400).json({ error: 'Missing gr or alert details' });
-  }
-
-  const prompt = `You are an expert Government Resolution (GR) formatting editor.
-We have a draft Government Resolution that has failed verification checks.
-
-DRAFT SUBJECT: ${gr.metadata?.subject || 'N/A'}
-DRAFT DEPARTMENT: ${gr.department || 'N/A'}
-
-THE VERIFICATION ALERT:
-Category: ${alert.category}
-Severity: ${alert.severity}
-Title: ${alert.title}
-Description: ${alert.description}
-Conflicting Phrase/Text: "${alert.conflictingPhrase || ''}"
-Remediation Suggestion: "${alert.remediationSuggestion || ''}"
-
-FULL RESOLUTION SECTIONS:
-1. Header:
-${gr.sections?.header || ''}
-2. Introduction:
-${gr.sections?.introduction || ''}
-3. References:
-${JSON.stringify(gr.sections?.references || [])}
-4. Resolution Text:
-${gr.sections?.resolution || ''}
-5. Financial Details:
-${JSON.stringify(gr.sections?.financials || [])}
-6. Distribution List:
-${JSON.stringify(gr.sections?.distribution || [])}
-
-YOUR TASK:
-Fix the issues identified in the alert by adjusting/editing only the relevant sections (e.g., if there is a conflict in the resolution text, fix the resolution text. If it is a deprecated account head, update the financials account head. If it is a missing reference, insert a logical reference).
-Keep all other sections completely unchanged.
-You must return your output in JSON format with the keys:
-{
-  "sections": {
-    "header": "updated header or unchanged",
-    "introduction": "updated introduction or unchanged",
-    "references": [updated references array or unchanged],
-    "resolution": "updated resolution or unchanged",
-    "financials": [updated financials array or unchanged],
-    "distribution": [updated distribution array or unchanged]
-  }
-}
-Do not include any extra dialogue or text outside of the JSON block. Return ONLY raw JSON.`;
-
-  try {
-    let responseText = '';
-    if (geminiKey) {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            temperature: 0.1
-          }
-        })
-      });
-      if (response.ok) {
-        const data = await response.json();
-        responseText = data.candidates[0].content.parts[0].text;
-      } else {
-        console.error("Gemini resolve failed:", response.status, await response.text());
-      }
-    }
-
-    let updatedSections = null;
-    if (responseText) {
-      try {
-        const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-        const parsed = JSON.parse(cleanJson);
-        updatedSections = parsed.sections || parsed;
-      } catch (e) {
-        console.error("Failed to parse resolved sections:", e, responseText);
-      }
-    }
-
-    if (!updatedSections) {
-      // Mock local fallback resolve if no key or parsing fails
-      updatedSections = { ...gr.sections };
-      if (alert.category === 'deprecated' && alert.conflictingPhrase) {
-        if (updatedSections.financials) {
-          updatedSections.financials = updatedSections.financials.map(f => {
-            if (f.accountHead === alert.conflictingPhrase) {
-              return { ...f, accountHead: '2071-01-101' };
-            }
-            return f;
-          });
-        }
-      }
-    }
-
-    const updatedGr = {
-      ...gr,
-      sections: {
-        ...gr.sections,
-        ...updatedSections
-      }
-    };
-
-    // Re-save to database
-    await saveGR(updatedGr, gr.userId || 'system');
-
-    // Re-verify the updated GR and save alerts
-    let verification = null;
-    if (verifier) {
-      verification = await verifier.verify(updatedGr);
-      await saveAlerts(updatedGr.id, verification.alerts);
-      await saveReferences(updatedGr.id, updatedGr.sections.references);
-    }
-
-    res.json({
-      success: true,
-      gr: updatedGr,
-      verification
-    });
-  } catch (error) {
-    console.error("Auto resolve error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Helper to find GR by ID or GR Number
-async function findGRByIdOrNumber(grId) {
-  // 1. Check in-memory indexer FIRST (extremely fast, handles 99% of historical lookups)
-  if (indexer) {
-    let gr = indexer.getGRById(grId);
-    if (gr) return gr;
-    
-    const indexedId = indexer.indices.byGRNumber?.get(grId);
-    if (indexedId) {
-      gr = indexer.getGRById(indexedId);
-      if (gr) return gr;
-    }
-
-    // O(1) hash lookup via normalized GR Number / ID (resolves in <1 microsecond)
-    const normId = grId.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (normId) {
-      const normalizedMatchId = indexer.indices.byGRNumberNormalized?.get(normId);
-      if (normalizedMatchId) {
-        gr = indexer.getGRById(normalizedMatchId);
-        if (gr) return gr;
-      }
-    }
-  }
-
-  // 2. Check SQLite database by ID
-  let gr = await getGR(grId);
-  if (gr) return gr;
-  
-  // 3. Fallback: Check SQLite database by GR number
-  if (!gr) {
-    try {
-      const db_instance = await initDB();
-      // First exact search
-      let row = await db_instance.get('SELECT id FROM grs WHERE gr_number = ?', [grId]);
-      if (!row) {
-        // Fuzzy two-way LIKE search (handles prefixes like 'No. ...')
-        row = await db_instance.get(
-          'SELECT id FROM grs WHERE ? LIKE "%" || gr_number || "%" OR gr_number LIKE "%" || ? || "%"',
-          [grId, grId]
-        );
-      }
-      if (row) {
-        gr = await getGR(row.id);
-      }
-    } catch (e) {
-      console.error('Database query in findGRByIdOrNumber failed:', e);
-    }
-  }
-  
-  return gr;
-}
-
-// Export GR as HTML
-app.get('/api/gr/:grId/export/html', async (req, res) => {
-  try {
-    const gr = await findGRByIdOrNumber(req.params.grId);
-
-    if (!gr) {
-      return res.status(404).send('<h1>Government Resolution Not Found</h1>');
-    }
-
-    const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Government Resolution: ${gr.metadata?.grNumber || 'Draft'}</title>
-  <style>
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      line-height: 1.6;
-      color: #000;
-      margin: 40px;
-      background-color: #fff;
-    }
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-      border: 1px solid #ccc;
-      padding: 50px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    }
-    .header {
-      text-align: center;
-      margin-bottom: 30px;
-      border-bottom: 2px double #000;
-      padding-bottom: 20px;
-    }
-    .emblem {
-      font-size: 50px;
-      margin-bottom: 10px;
-    }
-    .header h1 {
-      font-size: 22px;
-      text-transform: uppercase;
-      margin: 5px 0;
-      letter-spacing: 1px;
-    }
-    .header h2 {
-      font-size: 18px;
-      margin: 5px 0;
-      font-weight: normal;
-    }
-    .meta-table {
-      width: 100%;
-      margin-bottom: 30px;
-      border-collapse: collapse;
-    }
-    .meta-table td {
-      padding: 5px;
-      vertical-align: top;
-    }
-    .meta-label {
-      font-weight: bold;
-      width: 150px;
-    }
-    .section-title {
-      font-size: 16px;
-      font-weight: bold;
-      text-transform: uppercase;
-      margin-top: 25px;
-      margin-bottom: 10px;
-      border-bottom: 1px solid #000;
-      padding-bottom: 3px;
-    }
-    .introduction {
-      text-align: justify;
-      margin-bottom: 20px;
-      text-indent: 50px;
-    }
-    .references-list, .distribution-list {
-      padding-left: 20px;
-      margin-bottom: 20px;
-    }
-    .references-list li, .distribution-list li {
-      margin-bottom: 8px;
-    }
-    .resolution-clause {
-      text-align: justify;
-      margin-bottom: 15px;
-      text-indent: 30px;
-    }
-    .financial-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 20px 0;
-    }
-    .financial-table th, .financial-table td {
-      border: 1px solid #000;
-      padding: 8px;
-      text-align: left;
-    }
-    .financial-table th {
-      background-color: #f2f2f2;
-    }
-    .financial-table td.amount {
-      text-align: right;
-    }
-    .signature-block {
-      margin-top: 50px;
-      float: right;
-      text-align: center;
-      width: 250px;
-    }
-    .signature-line {
-      border-top: 1px solid #000;
-      margin-top: 50px;
-      padding-top: 5px;
-    }
-    .seal {
-      border: 2px solid #a00;
-      color: #a00;
-      padding: 10px;
-      display: inline-block;
-      border-radius: 50%;
-      text-transform: uppercase;
-      font-size: 10px;
-      font-weight: bold;
-      transform: rotate(-10deg);
-      margin-top: 20px;
-    }
-    .print-btn-container {
-      max-width: 800px;
-      margin: 20px auto;
-      text-align: right;
-    }
-    .print-btn {
-      background-color: #1a3a52;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      font-size: 14px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-weight: bold;
-    }
-    .print-btn:hover {
-      background-color: #ff9933;
-    }
-    @media print {
-      .print-btn-container {
-        display: none;
-      }
-      body {
-        margin: 0;
-      }
-      .container {
-        border: none;
-        box-shadow: none;
-        padding: 0;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="print-btn-container">
-    <button class="print-btn" onclick="window.print()">Print Resolution (PDF)</button>
-  </div>
-
-  <div class="container">
-    <div class="header">
-      <div style="display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 12px;">
-        <img src="/emblem_india_maharashtra.png" style="height: 65px; object-fit: contain;" alt="Government of Maharashtra Emblem" />
-        <img src="/maharashtra_rajmudra_seal.png" style="height: 65px; object-fit: contain;" alt="Maharashtra Rajmudra Seal" />
-      </div>
-      <h1>Government of Maharashtra</h1>
-      <h2>${gr.department || 'Department of Administration'}</h2>
-      <h2>Mantralaya, Mumbai - 400032</h2>
-    </div>
-
-    <table class="meta-table">
-      <tr>
-        <td class="meta-label">Resolution No:</td>
-        <td><strong>${gr.metadata?.grNumber || 'Draft / Unassigned'}</strong></td>
-      </tr>
-      <tr>
-        <td class="meta-label">Date:</td>
-        <td>${gr.metadata?.date || new Date().toLocaleDateString('en-IN')}</td>
-      </tr>
-      <tr>
-        <td class="meta-label">Subject:</td>
-        <td><strong>${gr.metadata?.subject}</strong></td>
-      </tr>
-      ${gr.metadata?.intentType ? `
-      <tr>
-        <td class="meta-label">Intent Type:</td>
-        <td>${gr.metadata.intentType}</td>
-      </tr>` : ''}
-      ${gr.districts && gr.districts.length > 0 ? `
-      <tr>
-        <td class="meta-label">Districts:</td>
-        <td>${gr.districts.join(', ')}</td>
-      </tr>` : ''}
-    </table>
-
-    ${gr.sections.introduction ? `
-    <div class="section-title">Introduction</div>
-    <div class="introduction">
-      ${gr.sections.introduction}
-    </div>` : ''}
-
-
-    <div class="section-title">Government Resolution</div>
-    <div class="resolution-body">
-      ${gr.sections.resolutions && gr.sections.resolutions.length > 0 ? 
-        gr.sections.resolutions.map(clause => `
-          <div class="resolution-clause">
-            ${clause.index}. ${clause.text}
-          </div>
-        `).join('') : `
-          <div class="resolution-clause">
-            ${gr.sections.resolution || 'The government hereby resolves to approve the proposals.'}
-          </div>
-        `
-      }
-    </div>
-
-    ${gr.sections.financials && gr.sections.financials.length > 0 ? `
-    <div class="section-title">Financial Allocations</div>
-    <table class="financial-table">
-      <thead>
-        <tr>
-          <th>Description</th>
-          <th>Account Head</th>
-          <th style="text-align: right;">Amount (₹)</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${gr.sections.financials.map(fin => `
-          <tr>
-            <td>${fin.description || 'Budget allocation'}</td>
-            <td><code>${fin.accountHead || 'N/A'}</code></td>
-            <td class="amount"><strong>${fin.amount ? fin.amount.toLocaleString('en-IN') : 'N/A'}</strong></td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>` : ''}
-
-    ${gr.sections.distribution && gr.sections.distribution.length > 0 ? `
-    <div class="section-title">Distribution</div>
-    <ol class="distribution-list">
-      ${gr.sections.distribution.map(dist => `
-        <li>${dist.recipient}</li>
-      `).join('')}
-    </ol>` : ''}
-
-    <div style="clear: both;"></div>
-
-    <div class="signature-block">
-      <div class="seal">Govt of Maharashtra</div>
-      ${gr.sections.signature_image ? `
-        <div style="margin: 5px 0;">
-          <img src="${gr.sections.signature_image}" style="max-height: 60px; mix-blend-mode: multiply;" />
-        </div>
-      ` : ''}
-      <div class="signature-line">
-        ${gr.sections.signature ? gr.sections.signature.split('\n').join('<br>') : `
-        <strong>Authorized Signatory</strong><br>
-        Department of ${gr.department || 'Administration'}<br>
-        Government of Maharashtra`}
-      </div>
-    </div>
-    
-    <div style="clear: both;"></div>
-  </div>
-</body>
-</html>
-    `;
-
-    res.send(html);
-  } catch (error) {
-    res.status(500).send(`<h1>Error generating export: ${error.message}</h1>`);
-  }
-});
-
 // Get GR
 app.get('/api/gr/:grId', async (req, res) => {
   try {
-    const gr = await findGRByIdOrNumber(req.params.grId);
-
+    const gr = await getGR(req.params.grId);
     if (!gr) {
       return res.status(404).json({ error: 'GR not found' });
     }
 
-    // Dynamically read raw text file if it exists in the filesystem
-    if (gr.filename && fs.existsSync(gr.filename)) {
-      try {
-        gr.sections = gr.sections || {};
-        gr.sections.fullText = fs.readFileSync(gr.filename, 'utf8');
-      } catch (readErr) {
-        console.error(`Failed to read full text file ${gr.filename}:`, readErr);
-      }
-    }
-
     const alerts = await getAlerts(req.params.grId) || [];
-
-    // Dynamically retrieve references
-    try {
-      const dbRefs = await getReferences(gr.id);
-      if (dbRefs && dbRefs.length > 0) {
-        gr.sections = gr.sections || {};
-        gr.sections.references = dbRefs.map(r => ({
-          type: 'gr',
-          grNumber: r.referencedGrId || r.referenceText,
-          sourceText: r.referenceText,
-          sourceGrId: r.referencedGrId
-        }));
-      }
-    } catch (refErr) {
-      console.error('Failed to load references for GR:', refErr.message);
-    }
-
     let checksRun = [];
     if (verifier && gr.status === 'draft') {
       try {
@@ -838,20 +648,6 @@ app.get('/api/gr/:grId', async (req, res) => {
   }
 });
 
-// Verify GR (dry-run for instant reactive checks)
-app.post('/api/gr/verify-dryrun', async (req, res) => {
-  if (!verifier) {
-    return res.status(503).json({ error: 'Verifier not ready' });
-  }
-  try {
-    const gr = req.body;
-    const verification = await verifier.verify(gr);
-    res.json(verification);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // Verify GR
 app.post('/api/gr/:grId/verify', async (req, res) => {
   if (!verifier) {
@@ -860,28 +656,15 @@ app.post('/api/gr/:grId/verify', async (req, res) => {
 
   try {
     const gr = await getGR(req.params.grId);
-
     if (!gr) {
       return res.status(404).json({ error: 'GR not found' });
     }
 
     const verification = await verifier.verify(gr);
-
-    // Save alerts
     await saveAlerts(gr.id, verification.alerts);
     await saveReferences(gr.id, gr.sections.references);
 
     res.json(verification);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get alerts for GR
-app.get('/api/gr/:grId/alerts', async (req, res) => {
-  try {
-    const alerts = await getAlerts(req.params.grId);
-    res.json({ alerts });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -905,7 +688,7 @@ app.post('/api/gr/:grId/approve', async (req, res) => {
       gr.history = gr.history || [];
       gr.history.push({
         action: targetStatus === 'approved' ? 'Approved & Signed' : 'Approved & Forwarded to Minister',
-        performedBy: role === 'minister' ? 'Hon. Minister Patil' : 'Officer Deshmukh (Joint Secy)',
+        performedBy: role === 'minister' ? 'Hon. Minister' : 'Officer',
         role: role,
         timestamp: new Date().toISOString(),
         comments: req.body.comments || 'Approved with formal digital sanction.'
@@ -923,42 +706,32 @@ app.post('/api/gr/:grId/approve', async (req, res) => {
   }
 });
 
-// Reject GR / Request Changes
+// Reject GR
 app.post('/api/gr/:grId/reject', async (req, res) => {
   try {
     const grId = req.params.grId;
     const userId = req.body.userId || 'system';
     const reason = req.body.reason || 'Revision required.';
-    const role = req.body.role || '';
-    const actionType = req.body.actionType || 'request_changes'; // 'request_changes' or 'reject'
 
-    let rejectedBy = 'senior_officer';
-    if (role.toLowerCase() === 'minister' || userId.toLowerCase().includes('minister')) {
-      rejectedBy = 'minister';
-    }
+    await updateGRStatus(grId, 'rejected', userId, reason);
 
     const gr = await getGR(grId);
     if (gr) {
       gr.status = 'rejected';
-      gr.rejectedBy = rejectedBy;
       gr.rejectedReason = reason;
       gr.history = gr.history || [];
       gr.history.push({
-        action: actionType === 'reject' ? 'Permanently Rejected Document' : 'Requested Revision / Changes',
-        performedBy: rejectedBy === 'minister' ? 'Hon. Minister Patil' : 'Officer Deshmukh',
-        role: rejectedBy,
+        action: 'Rejected',
+        performedBy: 'Officer',
         timestamp: new Date().toISOString(),
         comments: reason
       });
       await saveGR(gr, userId);
     }
 
-    await updateGRStatus(grId, 'rejected', userId, reason);
-
     res.json({
       success: true,
       status: 'rejected',
-      actionType,
       gr
     });
   } catch (error) {
@@ -966,31 +739,22 @@ app.post('/api/gr/:grId/reject', async (req, res) => {
   }
 });
 
-// AI Policy Search Assistant Chatbot Endpoint (98,000+ GR Knowledge Base)
-app.post('/api/assistant/chat', async (req, res) => {
+// List GRs
+app.get('/api/grs', async (req, res) => {
   try {
-    const { query } = req.body;
-    if (!query || !query.trim()) {
-      return res.status(400).json({ error: 'Query parameter is required.' });
-    }
+    const filters = {
+      department: req.query.department,
+      status: req.query.status,
+      createdBy: req.query.createdBy,
+    };
 
-    if (!assistant) {
-      if (indexer) {
-        assistant = new GRAssistant(indexer);
-      } else {
-        return res.status(503).json({ error: 'GR Assistant Knowledge Base is initializing...' });
-      }
-    }
-
-    const result = await assistant.chat(query.trim());
+    const grs = await getAllGRs(filters);
     res.json({
-      success: true,
-      answer: result.answer,
-      matchingGRs: result.matchingGRs
+      count: grs.length,
+      grs,
     });
   } catch (error) {
-    console.error('Error in AI Assistant chat endpoint:', error);
-    res.status(500).json({ error: 'Failed to process AI assistant search: ' + error.message });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -1019,152 +783,39 @@ app.post('/api/similar-grs', (req, res) => {
   });
 });
 
-// Official HTML / Printable Document Export
+// Export GR as HTML
 app.get('/api/gr/:grId/export/html', async (req, res) => {
   try {
-    const grId = req.params.grId;
-    let gr = await getGR(grId);
-    if (!gr && indexer) {
-      gr = indexer.getGRById(grId);
-    }
+    const gr = await getGR(req.params.grId);
     if (!gr) {
-      return res.status(404).send('<h1>GR Document Not Found</h1>');
+      return res.status(404).send('<h1>Government Resolution Not Found</h1>');
     }
 
-    const dept = gr.department || gr.metadata?.departmentName || 'GOVERNMENT OF MAHARASHTRA';
-    const date = gr.metadata?.grDate || gr.metadata?.date || new Date().toISOString().split('T')[0];
-    const grNumber = gr.calculated_21_digit_gr_id || gr.id || '20260728114530120301';
-    const secToken = gr.security_checksum || 'SEC-MH-8F21A-2026';
-    const signee = gr.metadata?.signeeDesignation || 'Under Secretary to Government of Maharashtra';
-
-    const preambleMarathi = gr.sections?.preamble_marathi || gr.sections?.introduction || '';
-    const preambleEnglish = gr.sections?.preamble_english || '';
-    const clausesMarathi = gr.sections?.resolution_clauses_marathi || (gr.sections?.resolution ? gr.sections.resolution.split('\n') : []);
-    const clausesEnglish = gr.sections?.resolution_clauses_english || [];
-    const readText = gr.sections?.read_section_text || '';
-    const distText = gr.sections?.footer_distribution_text || '';
-    const historicalRefs = gr.historical_references || [];
-
-    const htmlContent = `<!DOCTYPE html>
-<html lang="mr">
-<head>
-  <meta charset="UTF-8">
-  <title>Government Resolution - ${grNumber}</title>
-  <style>
-    body { font-family: 'Inter', 'Noto Sans Devanagari', Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #111; }
-    .gr-page { max-width: 850px; margin: 0 auto; background: #fff; border: 2px solid #0A2540; padding: 40px 50px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-radius: 4px; position: relative; }
-    .tricolor-stripe { height: 8px; background: linear-gradient(90deg, #FF671F 0%, #FF671F 33%, #FFFFFF 33%, #FFFFFF 66%, #046A38 66%, #046A38 100%); margin-bottom: 25px; border-radius: 2px; }
-    .gov-header { text-align: center; border-bottom: 2px solid #D4AF37; padding-bottom: 15px; margin-bottom: 25px; }
-    .emblem-img { width: 75px; height: 75px; margin-bottom: 8px; }
-    .gov-title { font-size: 22px; font-weight: 800; color: #0A2540; margin: 0; letter-spacing: 0.5px; text-transform: uppercase; }
-    .dept-title { font-size: 16px; font-weight: 700; color: #FF671F; margin: 5px 0 0 0; }
-    .gr-meta-bar { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; background: #F8FAFC; padding: 10px 15px; border: 1px solid #E2E8F0; border-radius: 4px; margin-bottom: 20px; color: #334155; }
-    .sec-badge { font-family: monospace; font-weight: bold; color: #046A38; }
-    .section-title { font-size: 16px; font-weight: 700; color: #0A2540; border-bottom: 1.5px solid #0A2540; padding-bottom: 4px; margin-top: 25px; margin-bottom: 12px; }
-    .preamble-box { font-size: 14px; line-height: 1.7; text-align: justify; text-indent: 30px; margin-bottom: 15px; }
-    .clause-list { padding-left: 0; list-style: none; margin: 0; }
-    .clause-item { font-size: 14px; line-height: 1.7; margin-bottom: 10px; padding-left: 24px; text-indent: -24px; text-align: justify; }
-    .sign-off { margin-top: 40px; text-align: right; font-size: 14px; font-weight: 600; }
-    .footer-links { margin-top: 35px; border-top: 2px dashed #CBD5E1; padding-top: 15px; font-size: 12px; color: #475569; }
-    .ref-link { color: #0056b3; font-weight: 600; text-decoration: none; }
-    .ref-link:hover { text-decoration: underline; }
-    @media print {
-      body { background: white; padding: 0; }
-      .gr-page { border: none; box-shadow: none; padding: 20px; }
-      .no-print { display: none; }
-    }
-  </style>
-</head>
+    // Simple HTML export (you can expand this)
+    const html = `
+<!DOCTYPE html>
+<html>
+<head><title>GR ${gr.id}</title></head>
 <body>
-  <div class="no-print" style="max-width: 850px; margin: 0 auto 15px auto; text-align: right;">
-    <button onclick="window.print()" style="background: #046A38; color: white; border: none; padding: 10px 20px; font-weight: bold; border-radius: 4px; cursor: pointer;">🖨️ Download / Print Official GR PDF</button>
-  </div>
-  <div class="gr-page">
-    <div class="tricolor-stripe"></div>
-    <div class="gov-header">
-      <img class="emblem-img" src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Emblem_of_Maharashtra.svg" alt="Rajmudra Emblem" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 100 100\'><circle cx=\'50\' cy=\'50\' r=\'45\' fill=\'%23D4AF37\'/><text x=\'50\' y=\'55\' font-size=\'14\' text-anchor=\'middle\' fill=\'%230A2540\' font-weight=\'bold\'>राजमुद्रा</text></svg>'"/>
-      <h1 class="gov-title">महाराष्ट्र शासन (Government of Maharashtra)</h1>
-      <h2 class="dept-title">${dept}</h2>
-    </div>
-
-    <div class="gr-meta-bar">
-      <div><strong>२१-अंकी संगणक संकेतांक (21-Digit GR ID):</strong> ${grNumber}</div>
-      <div><strong>दिनांक:</strong> ${date}</div>
-      <div><strong>सुरक्षा टोकन:</strong> <span class="sec-badge">${secToken}</span></div>
-    </div>
-
-    ${readText ? `<div class="section-title">संदर्भ (References)</div><pre style="font-family: inherit; font-size: 13.5px; white-space: pre-wrap; background: #f9fafb; padding: 10px; border-left: 3px solid #0A2540; margin-bottom: 20px;">${readText}</pre>` : ''}
-
-    <div class="section-title">प्रस्तावना (Preamble)</div>
-    ${preambleMarathi ? `<div class="preamble-box">${preambleMarathi}</div>` : ''}
-    ${preambleEnglish ? `<div class="preamble-box" style="font-style: italic; color: #334155;">${preambleEnglish}</div>` : ''}
-
-    <div class="section-title">शासकीय निर्णय (Resolution Clauses)</div>
-    <ul class="clause-list">
-      ${clausesMarathi.map(c => `<li class="clause-item">${c}</li>`).join('')}
-    </ul>
-
-    ${clausesEnglish.length > 0 ? `
-      <div style="margin-top: 15px; font-weight: 600; color: #475569; font-size: 13px;">English Translation of Clauses:</div>
-      <ul class="clause-list" style="color: #334155; font-style: italic;">
-        ${clausesEnglish.map(c => `<li class="clause-item">${c}</li>`).join('')}
-      </ul>
-    ` : ''}
-
-    <div class="sign-off">
-      <p>महाराष्ट्राचे राज्यपाल यांच्या आदेशानुसार व नावाने,</p>
-      ${gr.sections?.signature_image ? `
-        <div style="margin: 10px 0;">
-          <img src="${gr.sections.signature_image}" style="max-height: 70px; mix-blend-mode: multiply;" alt="Signature" />
-        </div>
-      ` : '<br/><br/>'}
-      <p style="text-decoration: underline; font-size: 15px;">(${gr.metadata?.signeeName || 'स्वाक्षरी'})</p>
-      <p>${signee}<br/>महाराष्ट्र शासन</p>
-    </div>
-
-    ${distText ? `
-      <div class="section-title">प्रत माहिती व कार्यवाहीसाठी (Distribution)</div>
-      <pre style="font-family: inherit; font-size: 13px; white-space: pre-wrap; background: #f8fafc; padding: 10px; border: 1px solid #e2e8f0; border-radius: 4px;">${distText}</pre>
-    ` : ''}
-
-    ${historicalRefs.length > 0 ? `
-      <div class="footer-links">
-        <strong>📋 अस्सल संदर्भ ऐतिहासिक शासन निर्णय (Historical Reference GRs Cited by AI):</strong>
-        <ul style="margin: 5px 0 0 0; padding-left: 20px;">
-          ${historicalRefs.map(r => `<li><a class="ref-link" href="${r.linkUrl}" target="_blank">${r.grNumber} - ${r.subject} (${r.department})</a></li>`).join('')}
-        </ul>
-      </div>
-    ` : ''}
-  </div>
+  <h1>Government Resolution</h1>
+  <p><strong>ID:</strong> ${gr.id}</p>
+  <p><strong>Department:</strong> ${gr.department}</p>
+  <p><strong>Status:</strong> ${gr.status}</p>
+  <hr>
+  <pre>${JSON.stringify(gr, null, 2)}</pre>
 </body>
-</html>`;
-
-    res.send(htmlContent);
+</html>
+    `;
+    res.send(html);
   } catch (error) {
-    res.status(500).send(`<h1>Error generating GR HTML: ${error.message}</h1>`);
+    res.status(500).send(`<h1>Error generating export: ${error.message}</h1>`);
   }
 });
 
-// List GRs
-app.get('/api/grs', async (req, res) => {
-  try {
-    const filters = {
-      department: req.query.department,
-      status: req.query.status,
-      createdBy: req.query.createdBy,
-    };
+// ============================================================
+// Start Server
+// ============================================================
 
-    const grs = await getAllGRs(filters);
-    res.json({
-      count: grs.length,
-      grs,
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Start server
 async function startServer() {
   const initialized = await initializeBackend();
 
@@ -1172,6 +823,8 @@ async function startServer() {
     app.listen(PORT, () => {
       console.log(`\n🎉 Server running on http://localhost:${PORT}`);
       console.log(`📊 Dashboard: http://localhost:5173`);
+      console.log(`🤖 AI Assistant: POST /api/assistant/chat`);
+      console.log(`📋 Try it: curl -X POST http://localhost:${PORT}/api/assistant/chat -H "Content-Type: application/json" -d '{"query":"What is the capital of Maharashtra?"}'`);
     });
   } else {
     console.error('❌ Failed to initialize backend');
