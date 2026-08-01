@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-
+import './Dashboard.css';
 
 export default function Dashboard({ user, setCurrentGR }) {
   const navigate = useNavigate();
@@ -172,13 +172,13 @@ export default function Dashboard({ user, setCurrentGR }) {
         Welcome back, {user.name}!
       </h2>
       <p style={{ color: '#666', marginBottom: '24px' }}>
-        Role: <strong style={{ color: '#ff9933' }}>{user.role.toUpperCase().replace('_', ' ')}</strong> | Department of Administration
+        Role: <strong style={{ color: '#ff9933' }}>{user.role.toUpperCase().replace('_', ' ')}</strong> | Department of {user.department || 'Administration'}
       </p>
 
       {/* Stats Grid */}
       <div className="stats-grid">
         <div className="stat-card" onClick={() => navigate('/analytics')}>
-          <div className="stat-icon" style={{ background: '#e1f5fe' }}>🏛️</div>
+          <div className="stat-icon" style={{ background: '#e1f5fe' }}><Building2 size={32} strokeWidth={1.5} color="#0277bd" /></div>
           <div className="stat-content">
             <div className="stat-value">{stats.totalHistoricalGRs.toLocaleString()}</div>
             <div className="stat-label">Historical GR Base</div>
@@ -187,7 +187,7 @@ export default function Dashboard({ user, setCurrentGR }) {
 
         {user.role === 'clerk' && (
           <div className="stat-card">
-            <div className="stat-icon" style={{ background: '#fff3e0' }}>📝</div>
+            <div className="stat-icon" style={{ background: '#fff3e0' }}><FileText size={32} strokeWidth={1.5} color="#e65100" /></div>
             <div className="stat-content">
               <div className="stat-value">{stats.activeDraftsCount}</div>
               <div className="stat-label">Active Drafts</div>
@@ -197,7 +197,7 @@ export default function Dashboard({ user, setCurrentGR }) {
 
         {user.role === 'senior_officer' && (
           <div className="stat-card" onClick={() => navigate('/approve/pending')}>
-            <div className="stat-icon" style={{ background: '#ffe0b2' }}>⏳</div>
+            <div className="stat-icon" style={{ background: '#ffe0b2' }}><Clock size={32} strokeWidth={1.5} color="#e65100" /></div>
             <div className="stat-content">
               <div className="stat-value">{stats.pendingApprovalsCount}</div>
               <div className="stat-label">Pending Review</div>
@@ -207,7 +207,7 @@ export default function Dashboard({ user, setCurrentGR }) {
 
         {user.role === 'minister' && (
           <div className="stat-card" onClick={() => navigate('/approve/pending')}>
-            <div className="stat-icon" style={{ background: '#ffe0b2' }}>✍️</div>
+            <div className="stat-icon" style={{ background: '#ffe0b2' }}><PenTool size={32} strokeWidth={1.5} color="#e65100" /></div>
             <div className="stat-content">
               <div className="stat-value">{stats.pendingSignaturesCount}</div>
               <div className="stat-label">Awaiting Signature</div>
@@ -216,7 +216,7 @@ export default function Dashboard({ user, setCurrentGR }) {
         )}
 
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: '#e8f5e9' }}>✅</div>
+          <div className="stat-icon" style={{ background: '#e8f5e9' }}><CheckCircle size={32} strokeWidth={1.5} color="#2e7d32" /></div>
           <div className="stat-content">
             <div className="stat-value">{stats.approvedCount}</div>
             <div className="stat-label">Signed Resolutions</div>
@@ -230,16 +230,16 @@ export default function Dashboard({ user, setCurrentGR }) {
         <div className="action-buttons" style={{ marginTop: '12px' }}>
           {user.role === 'clerk' && (
             <button className="action-btn primary" onClick={() => navigate('/create')}>
-              <span className="icon">➕</span> Create New GR
+              <span className="icon"><Plus size={16} strokeWidth={2} /></span> Create New GR
             </button>
           )}
           {(user.role === 'senior_officer' || user.role === 'minister') && (
             <button className="action-btn primary" onClick={() => navigate('/approve/pending')}>
-              <span className="icon">🗳️</span> Go to Review Queue
+              <span className="icon"><File size={16} strokeWidth={2} /></span> Go to Review Queue
             </button>
           )}
           <button className="action-btn secondary" onClick={() => navigate('/analytics')}>
-            <span className="icon">📊</span> View Analytics
+            <span className="icon"><BarChart size={16} strokeWidth={2} /></span> View Analytics
           </button>
         </div>
       </div>
@@ -247,7 +247,7 @@ export default function Dashboard({ user, setCurrentGR }) {
       {/* Historical GR Search Section */}
       <div className="simple-search-card">
         <h3 className="simple-search-title">
-          🔍 Search Historical Resolution Database (98,980 GRs)
+          <Search size={20} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Search Historical Resolution Database (98,980 GRs)
         </h3>
 
         <form onSubmit={handleSearchSubmit}>
@@ -390,7 +390,7 @@ export default function Dashboard({ user, setCurrentGR }) {
                               className="pdf-download-link"
                             >
                               <div className="pdf-icon-badge" title="View Official PDF">
-                                📄
+                                <File size={20} strokeWidth={2} />
                               </div>
                             </a>
                           </td>
@@ -454,7 +454,7 @@ export default function Dashboard({ user, setCurrentGR }) {
                             style={{ padding: '6px 12px', fontSize: '12px' }}
                             onClick={() => handleEditDraft(gr)}
                           >
-                            ✎ Edit
+                            <Edit size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Edit
                           </button>
                         </td>
                       </tr>
@@ -543,7 +543,7 @@ export default function Dashboard({ user, setCurrentGR }) {
                             style={{ padding: '6px 12px', fontSize: '12px', background: '#ff9933' }}
                             onClick={() => handleReviewGR(gr)}
                           >
-                            🗳️ Review
+                            <File size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Review
                           </button>
                         </td>
                       </tr>
@@ -588,7 +588,7 @@ export default function Dashboard({ user, setCurrentGR }) {
                             style={{ padding: '6px 12px', fontSize: '12px', background: '#ff9933' }}
                             onClick={() => handleReviewGR(gr)}
                           >
-                            ✍️ Sign Off
+                            <PenTool size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Sign Off
                           </button>
                         </td>
                       </tr>
@@ -641,7 +641,7 @@ export default function Dashboard({ user, setCurrentGR }) {
                           style={{ padding: '6px 12px', fontSize: '12px' }}
                           onClick={() => window.open(`http://localhost:5000/api/gr/${gr.id}/export/html`, '_blank')}
                         >
-                          📄 View HTML/PDF
+                          <File size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> View HTML/PDF
                         </button>
                       </td>
                     </tr>
@@ -657,7 +657,7 @@ export default function Dashboard({ user, setCurrentGR }) {
       {/* Top Departments Visual Card Grid */}
       <div className="recent-activity" style={{ padding: '24px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
         <h3 style={{ color: '#0A2540', marginBottom: '16px', fontSize: '18px', fontWeight: '800' }}>
-          🏛️ Key Administrative Departments (Historical GR Index)
+          <Building2 size={24} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Key Administrative Departments (Historical GR Index)
         </h3>
         <p style={{ fontSize: '13px', color: '#64748B', marginTop: '-10px', marginBottom: '20px' }}>
           Click any department card to explore historical Government Resolutions and precursor policies.
@@ -692,10 +692,10 @@ export default function Dashboard({ user, setCurrentGR }) {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <span style={{ fontSize: '24px' }}>
-                    {dept.name.toLowerCase().includes('finance') ? '💰' : 
-                     dept.name.toLowerCase().includes('education') ? '🎓' : 
-                     dept.name.toLowerCase().includes('urban') ? '🏙️' : 
-                     dept.name.toLowerCase().includes('health') ? '🏥' : '📜'}
+                    {dept.name.toLowerCase().includes('finance') ? <DollarSign size={32} strokeWidth={1.5} color="#2e7d32" /> : 
+                     dept.name.toLowerCase().includes('education') ? <GraduationCap size={32} strokeWidth={1.5} color="#1565c0" /> : 
+                     dept.name.toLowerCase().includes('urban') ? <Building size={32} strokeWidth={1.5} color="#6d4c41" /> : 
+                     dept.name.toLowerCase().includes('health') ? <Stethoscope size={32} strokeWidth={1.5} color="#c62828" /> : <Scroll size={32} strokeWidth={1.5} color="#6a1b9a" />}
                   </span>
                   <span style={{ background: '#FF671F', color: 'white', padding: '3px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
                     {dept.count.toLocaleString()} GRs

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import axios from 'axios';
+import { Building2, FileText, Scale, DollarSign, PenTool, Printer, CheckCircle, Save, Clock, X, AlertTriangle, Pin, Lightbulb, Link, Wrench, Zap, Check, Edit, Book, File } from 'lucide-react';
 import './DraftWorkspace.css';
 
 export default function DraftWorkspace({ currentGR }) {
@@ -131,7 +132,7 @@ export default function DraftWorkspace({ currentGR }) {
         setAlerts(response.data.verification?.alerts || []);
         setChecksRun(response.data.verification?.checksRun || []);
         setSavedStatus('unsaved');
-        alert(`⚡ Conflict resolved successfully! The conflicting lines have been updated directly.`);
+        alert(`Conflict resolved successfully! The conflicting lines have been updated directly.`);
       } else {
         alert('Failed to auto-resolve: ' + response.data.error);
       }
@@ -257,7 +258,7 @@ export default function DraftWorkspace({ currentGR }) {
 
   const handleSubmit = async () => {
     if (alerts.length > 0) {
-      alert(`⚠️ Please resolve (Auto-Fix) or dismiss all ${alerts.length} alerts before submitting.`);
+      alert(`Please resolve (Auto-Fix) or dismiss all ${alerts.length} alerts before submitting.`);
       return;
     }
     setSubmitting(true);
@@ -378,7 +379,7 @@ export default function DraftWorkspace({ currentGR }) {
               setChecksRun(proposedChange.verification?.checksRun || []);
               setSavedStatus('unsaved');
               setProposedChange(null);
-            }}>Accept ✓</button>
+            }}>Accept <Check size={12} strokeWidth={2} style={{ verticalAlign: 'middle', marginLeft: '4px' }} /></button>
             <button style={{
               backgroundColor: '#64748b',
               color: 'white',
@@ -442,14 +443,14 @@ export default function DraftWorkspace({ currentGR }) {
             }}
             onClick={() => window.open(`http://localhost:5000/api/gr/${encodeURIComponent(gr.id)}/export/html`, '_blank')}
           >
-            🖨️ Official Format & PDF Download
+            <Printer size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Official Format & PDF Download
           </button>
 
           <button className={`save-btn ${savedStatus}`} onClick={handleSave}>
-            {savedStatus === 'saved' && '✅ Saved'}
-            {savedStatus === 'unsaved' && '💾 Save'}
-            {savedStatus === 'saving' && '⏳ Saving...'}
-            {savedStatus === 'error' && '❌ Error'}
+            {savedStatus === 'saved' && <><CheckCircle size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Saved</>}
+            {savedStatus === 'unsaved' && <><Save size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Save</>}
+            {savedStatus === 'saving' && <><Clock size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Saving...</>}
+            {savedStatus === 'error' && <><X size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Error</>}
           </button>
         </div>
       </div>
@@ -465,7 +466,7 @@ export default function DraftWorkspace({ currentGR }) {
           color: alerts.some(a => a.severity === 'critical') ? '#7F1D1D' : '#78350F'
         }}>
           <h3 style={{ margin: '0 0 12px 0', fontSize: '18px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: '8px' }}>
-            🚨 TASK A: POLICY & CONFLICT AUDITING ALERT ({alerts.some(a => a.severity === 'critical') ? 'CRITICAL' : 'WARNING'})
+            <AlertTriangle size={20} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> TASK A: POLICY & CONFLICT AUDITING ALERT ({alerts.some(a => a.severity === 'critical') ? 'CRITICAL' : 'WARNING'})
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {alerts.map((alert, idx) => {
@@ -489,7 +490,7 @@ export default function DraftWorkspace({ currentGR }) {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <div style={{ fontWeight: '800', fontSize: '14.5px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      📌 {alert.title || alert.category || 'Policy Conflict'}
+                      <Pin size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '6px' }} /> {alert.title || alert.category || 'Policy Conflict'}
                     </div>
                     <span style={{ 
                       fontSize: '10px', 
@@ -513,7 +514,7 @@ export default function DraftWorkspace({ currentGR }) {
                   )}
                   {alert.remediationSuggestion && (
                     <div style={{ color: '#0284c7', fontWeight: '600', display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '14px' }}>💡</span>
+                      <Lightbulb size={14} strokeWidth={2} style={{ verticalAlign: 'middle' }} />
                       <span><strong>Steps to resolve:</strong> {alert.remediationSuggestion}</span>
                     </div>
                   )}
@@ -542,7 +543,7 @@ export default function DraftWorkspace({ currentGR }) {
                             gap: '4px'
                           }}
                         >
-                          🔗 View Conflicting GR ({alert.sourceGrId})
+                          <Link size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> View Conflicting GR ({alert.sourceGrId})
                         </button>
                       )}
                     </div>
@@ -564,7 +565,7 @@ export default function DraftWorkspace({ currentGR }) {
                               cursor: 'pointer'
                             }}
                           >
-                            {resolvingAlertId === alert.id ? '⏳ ...' : '🔧 Preview Fix'}
+                            {resolvingAlertId === alert.id ? <Clock size={14} strokeWidth={2} style={{ verticalAlign: 'middle' }} /> : <Wrench size={14} strokeWidth={2} style={{ verticalAlign: 'middle' }} />} Preview Fix
                           </button>
                           <button 
                             onClick={() => handleDirectAutoResolve(alert)}
@@ -580,7 +581,7 @@ export default function DraftWorkspace({ currentGR }) {
                               cursor: 'pointer'
                             }}
                           >
-                            {resolvingAlertId === alert.id ? '⏳ Resolving...' : '⚡ Auto-Resolve'}
+                            {resolvingAlertId === alert.id ? <><Clock size={14} strokeWidth={2} style={{ verticalAlign: 'middle' }} /> Resolving...</> : <><Zap size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Auto-Resolve</>}
                           </button>
                         </>
                       )}
@@ -613,28 +614,28 @@ export default function DraftWorkspace({ currentGR }) {
         <div className="workspace-outline">
           <div className="outline-title">Outline</div>
           <button className="outline-item" onClick={() => document.getElementById('sec-header')?.scrollIntoView({ behavior: 'smooth' })}>
-            <span>🏛️</span> Header
+            <Building2 size={20} strokeWidth={2} /> Header
           </button>
           <button className="outline-item" onClick={() => document.getElementById('sec-introduction')?.scrollIntoView({ behavior: 'smooth' })}>
-            <span>📝</span> Introduction
+            <FileText size={20} strokeWidth={2} /> Introduction
           </button>
           <button className="outline-item" onClick={() => document.getElementById('sec-resolution')?.scrollIntoView({ behavior: 'smooth' })}>
-            <span>⚖️</span> Resolution
+            <Scale size={20} strokeWidth={2} /> Resolution
           </button>
           {gr.gr_type === '1_FINANCIAL_SANCTION' && (
             <button className="outline-item" onClick={() => document.getElementById('sec-financials')?.scrollIntoView({ behavior: 'smooth' })}>
-              <span>💰</span> Financials
+              <DollarSign size={20} strokeWidth={2} /> Financials
             </button>
           )}
           <button className="outline-item" onClick={() => document.getElementById('sec-signature')?.scrollIntoView({ behavior: 'smooth' })}>
-            <span>✍️</span> Signature
+            <PenTool size={20} strokeWidth={2} /> Signature
           </button>
         </div>
 
         {/* Center: Draft Editor */}
         <div className="draft-pane">
           <div className="pane-title">
-            <h3>📝 Draft Sections (मसुदा विभाग)</h3>
+            <h3><FileText size={20} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Draft Sections (मसुदा विभाग)</h3>
           </div>
 
           {/* Header Section */}
@@ -642,7 +643,7 @@ export default function DraftWorkspace({ currentGR }) {
             <div className="section-header">
               <h4>Header (शीर्षक)</h4>
               <button className="edit-btn" onClick={() => setEditingSection(editingSection === 'header' ? null : 'header')}>
-                {editingSection === 'header' ? '✓' : '✎'}
+                {editingSection === 'header' ? <Check size={14} strokeWidth={2} /> : <Edit size={14} strokeWidth={2} />}
               </button>
             </div>
             {renderSectionContent('header', gr.sections.header)}
@@ -653,7 +654,7 @@ export default function DraftWorkspace({ currentGR }) {
             <div className="section-header">
               <h4>Introduction (प्रस्तावना)</h4>
               <button className="edit-btn" onClick={() => setEditingSection(editingSection === 'introduction' ? null : 'introduction')}>
-                {editingSection === 'introduction' ? '✓' : '✎'}
+                {editingSection === 'introduction' ? <Check size={14} strokeWidth={2} /> : <Edit size={14} strokeWidth={2} />}
               </button>
             </div>
             {renderSectionContent('introduction', gr.sections.introduction)}
@@ -664,7 +665,7 @@ export default function DraftWorkspace({ currentGR }) {
           {/* Similar Resolutions (Historical context library) */}
           <div className="section-card">
             <div className="section-header">
-              <h4>📚 Similar Resolutions (शासन निर्णय लायब्ररी)</h4>
+              <h4><Book size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Similar Resolutions (शासन निर्णय लायब्ररी)</h4>
               <span className="count">{similarGrs?.length || 0}</span>
             </div>
             <div className="references-list" style={{ maxHeight: '180px', overflowY: 'auto' }}>
@@ -697,7 +698,7 @@ export default function DraftWorkspace({ currentGR }) {
                         fontSize: '12px'
                       }}
                     >
-                      🔗 GR {sim.metadata?.grNumber || sim.id}
+                      <Link size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> GR {sim.metadata?.grNumber || sim.id}
                     </a>
                     <span style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                       {sim.metadata?.subject}
@@ -715,7 +716,7 @@ export default function DraftWorkspace({ currentGR }) {
             <div className="section-header">
               <h4>Resolution (शासन निर्णय)</h4>
               <button className="edit-btn" onClick={() => setEditingSection(editingSection === 'resolution' ? null : 'resolution')}>
-                {editingSection === 'resolution' ? '✓' : '✎'}
+                {editingSection === 'resolution' ? <Check size={14} strokeWidth={2} /> : <Edit size={14} strokeWidth={2} />}
               </button>
             </div>
             {renderSectionContent('resolution', gr.sections.resolution)}

@@ -74,7 +74,7 @@
 .form-card {
   background: #F8FAFC;
   border: 1px solid #E2E8F0;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 20px;
   position: relative;
 }
@@ -134,19 +134,17 @@
   width: 100%;
   padding: 10px 14px;
   border: 1px solid #CBD5E1;
-  border-radius: 6px;
+  border-radius: 4px;
   font-size: 14px;
   font-family: inherit;
   color: #0F172A;
   background: #FFFFFF;
   box-sizing: border-box;
-  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .form-control-styled:focus {
   outline: none;
   border-color: #FF671F;
-  box-shadow: 0 0 0 3px rgba(255, 103, 31, 0.15);
 }
 
 .field-hint {
@@ -168,9 +166,8 @@
   padding: 12px 24px;
   font-size: 14px;
   font-weight: 700;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
-  transition: background 0.2s;
 }
 
 .btn-primary-styled:hover {
@@ -190,26 +187,24 @@
   padding: 10px 16px;
   background: #FFFFFF;
   border: 1px solid #CBD5E1;
-  border-radius: 6px;
+  border-radius: 4px;
   font-size: 13px;
   font-weight: 700;
   color: #475569;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.2s;
 }
 
 .tab-btn.active {
   background: #FF671F;
   color: #FFFFFF;
   border-color: #FF671F;
-  box-shadow: 0 2px 6px rgba(255, 103, 31, 0.3);
 }
 
 .archetype-fields-panel {
   background: #FFFFFF;
   border: 1px solid #E2E8F0;
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 20px;
 }
 
@@ -258,7 +253,7 @@
   background: #FFFFFF;
   padding: 12px;
   border: 1px solid #E2E8F0;
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 .flex-col {
@@ -314,21 +309,18 @@
 }
 
 .btn-generate-main {
-  background: linear-gradient(135deg, #046A38 0%, #064e28 100%);
+  background: #046A38;
   color: #FFFFFF;
   border: none;
   padding: 14px 28px;
   font-size: 15px;
   font-weight: 800;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(4, 106, 56, 0.3);
-  transition: all 0.2s;
 }
 
 .btn-generate-main:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(4, 106, 56, 0.4);
+  background: #064e28;
 }
 
 @media (max-width: 900px) {

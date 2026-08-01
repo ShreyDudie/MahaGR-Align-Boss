@@ -4,6 +4,7 @@ import {
   BarChart, Bar, PieChart, Pie, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, Cell
 } from 'recharts';
+import { BarChart as BarChartIcon } from 'lucide-react';
 import './AnalyticsDashboard.css';
 
 const COLORS = ['#1a3a52', '#ff9933', '#27ae60', '#e74c3c', '#3498db', '#9b59b6', '#f39c12', '#16a085'];
@@ -67,7 +68,7 @@ export default function AnalyticsDashboard() {
       </div>
 
       <div className="dashboard-header" style={{ marginBottom: '24px' }}>
-        <h2 style={{ color: '#1a3a52' }}>📊 Analytics & Insights</h2>
+        <h2 style={{ color: '#1a3a52' }}><BarChartIcon size={24} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Analytics & Insights</h2>
         <p style={{ color: '#666' }}>Government Resolution trends and budget statistics</p>
       </div>
 

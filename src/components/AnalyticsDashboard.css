@@ -31,16 +31,9 @@
 .kpi-card {
   background: white;
   border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  transition: all 0.2s;
   border-left: 4px solid #ff9933;
-}
-
-.kpi-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  transform: translateY(-2px);
 }
 
 .kpi-label {
@@ -74,9 +67,8 @@
 .chart-card {
   background: white;
   border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .chart-card h3 {
@@ -172,13 +164,11 @@
 .dept-selector select:focus {
   outline: none;
   border-color: #ff9933;
-  box-shadow: 0 0 0 3px rgba(255, 153, 51, 0.1);
 }
 
 /* Department Details */
 .dept-details {
   background: #f9f9f9;
-  border-radius: 4px;
   padding: 12px;
 }
 
@@ -208,9 +198,8 @@
 .export-section {
   background: white;
   border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .export-section h3 {
@@ -235,26 +224,12 @@
   font-weight: 600;
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s;
   background: #1a3a52;
   color: white;
 }
 
 .export-btn:hover {
   background: #0d1f2d;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.export-btn.pdf::before {
-  content: '📄 ';
-}
-
-.export-btn.excel::before {
-  content: '📊 ';
-}
-
-.export-btn.csv::before {
-  content: '📋 ';
 }
 
 /* Responsive */
@@ -279,16 +254,5 @@
 
   .export-btn {
     width: 100%;
-  }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }

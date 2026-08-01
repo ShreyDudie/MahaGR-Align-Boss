@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import { CheckCircle, X, FileText, AlertTriangle, PenTool, Circle, Scroll } from 'lucide-react';
 import './ExecutiveDashboard.css';
 
 export default function ExecutiveDashboard({ user }) {
@@ -52,7 +53,7 @@ export default function ExecutiveDashboard({ user }) {
       setGrs(prev => prev.filter(gr => gr.id !== grId));
       setSelectedGR(null);
       setSignatureImage(null);
-      alert(user.role === 'minister' ? '✅ GR approved and signed off!' : '✅ GR approved and forwarded to Minister!');
+      alert(user.role === 'minister' ? 'GR approved and signed off!' : 'GR approved and forwarded to Minister!');
     } catch (error) {
       alert('Error approving GR: ' + error.message);
     }
@@ -69,9 +70,9 @@ export default function ExecutiveDashboard({ user }) {
       setGrs(prev => prev.filter(gr => gr.id !== grId));
       setSelectedGR(null);
       if (actionType === 'reject') {
-        alert('❌ GR permanently rejected.');
+        alert('GR permanently rejected.');
       } else {
-        alert('📝 Revision comments sent back to Desk Officer.');
+        alert('Revision comments sent back to Desk Officer.');
       }
     } catch (error) {
       alert('Error rejecting GR: ' + error.message);
@@ -86,7 +87,7 @@ export default function ExecutiveDashboard({ user }) {
     return (
       <div className="executive-dashboard">
         <div className="empty-state">
-          <span className="icon">✅</span>
+          <span className="icon"><CheckCircle size={32} strokeWidth={2} /></span>
           <h3>No pending approvals</h3>
           <p>All Government Resolutions are up to date.</p>
         </div>
@@ -118,7 +119,7 @@ export default function ExecutiveDashboard({ user }) {
                 <div className="queue-header">
                   <span className="queue-dept">{gr.department}</span>
                   <span className="queue-priority">
-                    {(gr.verification?.summary?.critical || 0) > 0 ? '🔴 Critical' : '🟡 Review'}
+                    {(gr.verification?.summary?.critical || 0) > 0 ? <><Circle size={8} strokeWidth={2} fill="#dc2626" color="#dc2626" style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Critical</> : <><Circle size={8} strokeWidth={2} fill="#d97706" color="#d97706" style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Review</>}
                   </span>
                 </div>
                 <div className="queue-subject">{gr.metadata?.subject?.substring(0, 50)}</div>
@@ -140,7 +141,7 @@ export default function ExecutiveDashboard({ user }) {
                 <h3 style={{ margin: 0 }}>{selected.metadata?.subject}</h3>
               </div>
               <div className={`compliance-badge ${hasIssues ? 'warning' : 'success'}`}>
-                {hasIssues ? '⚠️ Review Issues' : '✅ Compliant'}
+                {hasIssues ? <><AlertTriangle size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Review Issues</> : <><CheckCircle size={14} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Compliant</>}
               </div>
             </div>
 
@@ -184,7 +185,7 @@ export default function ExecutiveDashboard({ user }) {
             {/* Audit Log / History for Transparency */}
             {selected.history && selected.history.length > 0 && (
               <div className="issues-panel" style={{ backgroundColor: '#f8fafc', border: '1px solid #cbd5e1' }}>
-                <h4 style={{ color: '#0f172a' }}>📜 Audit Trail & Action Log ({selected.history.length})</h4>
+                <h4 style={{ color: '#0f172a' }}><Scroll size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Audit Trail & Action Log ({selected.history.length})</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12.5px', color: '#334155' }}>
                   {selected.history.map((log, idx) => (
                     <div key={idx} style={{ background: 'white', padding: '8px 12px', borderRadius: '4px', borderLeft: '3px solid #0284c7' }}>
@@ -224,7 +225,7 @@ export default function ExecutiveDashboard({ user }) {
                 textAlign: 'left'
               }}>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#1e293b', display: 'block', marginBottom: '8px' }}>
-                  ✍️ Hon. Minister Signature Drawing Pad (मंत्री स्वाक्षरी ड्रॉइंग टॅब)
+                  <PenTool size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Hon. Minister Signature Drawing Pad (मंत्री स्वाक्षरी ड्रॉइंग टॅब)
                 </label>
                 <div style={{ position: 'relative', width: 'fit-content' }}>
                   <canvas
@@ -338,7 +339,7 @@ export default function ExecutiveDashboard({ user }) {
                 onClick={() => handleApprove(selected.id)}
                 style={{ flex: 1, backgroundColor: '#059669' }}
               >
-                ✅ Approve & Sign
+                <CheckCircle size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Approve & Sign
               </button>
               <button
                 className="btn"
@@ -348,7 +349,7 @@ export default function ExecutiveDashboard({ user }) {
                 }}
                 style={{ flex: 1, backgroundColor: '#d97706', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', padding: '10px' }}
               >
-                📝 Request Changes
+                <FileText size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Request Changes
               </button>
               <button
                 className="btn btn-reject"
@@ -358,7 +359,7 @@ export default function ExecutiveDashboard({ user }) {
                 }}
                 style={{ flex: 1, backgroundColor: '#dc2626' }}
               >
-                ❌ Reject Document
+                <X size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Reject Document
               </button>
             </div>
           </div>
