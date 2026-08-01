@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { DollarSign, Scroll, Briefcase, Scale, Edit, CheckCircle, Zap, Circle } from 'lucide-react';
 import './GRWizard.css';
 
 // 33 Standard Departments of Government of Maharashtra
@@ -409,31 +410,31 @@ export default function GRWizard({ setCurrentGR, user }) {
                 className={`tab-btn ${selectedArchetype === '1_FINANCIAL_SANCTION' ? 'active' : ''}`}
                 onClick={() => setSelectedArchetype('1_FINANCIAL_SANCTION')}
               >
-                💰 1. Financial Sanction
+                <DollarSign size={18} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> 1. Financial Sanction
               </button>
               <button 
                 className={`tab-btn ${selectedArchetype === '2_POLICY_SCHEME' ? 'active' : ''}`}
                 onClick={() => setSelectedArchetype('2_POLICY_SCHEME')}
               >
-                📜 2. Policy / Scheme
+                <Scroll size={18} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> 2. Policy / Scheme
               </button>
               <button 
                 className={`tab-btn ${selectedArchetype === '3_ESTABLISHMENT_HR' ? 'active' : ''}`}
                 onClick={() => setSelectedArchetype('3_ESTABLISHMENT_HR')}
               >
-                👔 3. HR / Establishment
+                <Briefcase size={18} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> 3. HR / Establishment
               </button>
               <button 
                 className={`tab-btn ${selectedArchetype === '4_STATUTORY_NOTIFICATION' ? 'active' : ''}`}
                 onClick={() => setSelectedArchetype('4_STATUTORY_NOTIFICATION')}
               >
-                ⚖️ 4. Statutory Notification
+                <Scale size={18} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> 4. Statutory Notification
               </button>
               <button 
                 className={`tab-btn ${selectedArchetype === '5_CORRIGENDUM' ? 'active' : ''}`}
                 onClick={() => setSelectedArchetype('5_CORRIGENDUM')}
               >
-                ✏️ 5. Corrigendum (शुद्धिपत्र)
+                <Edit size={18} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> 5. Corrigendum (शुद्धिपत्र)
               </button>
             </div>
 
@@ -803,7 +804,7 @@ export default function GRWizard({ setCurrentGR, user }) {
                       color: isPassed ? '#27ae60' : isCurrent ? '#ff9933' : '#94a3b8',
                       fontWeight: 'bold'
                     }}>
-                      {isPassed ? '✅' : isCurrent ? '⚡' : '○'}
+                      {isPassed ? <CheckCircle size={14} strokeWidth={2} /> : isCurrent ? <Zap size={14} strokeWidth={2} /> : <Circle size={14} strokeWidth={2} />}
                     </span>
                     <div>
                       <div style={{ fontSize: '13px', fontWeight: '600', color: isCurrent ? '#ff9933' : '#ffffff' }}>

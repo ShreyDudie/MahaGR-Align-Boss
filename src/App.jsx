@@ -6,10 +6,15 @@ import DraftWorkspace from './components/DraftWorkspace'
 import ExecutiveDashboard from './components/ExecutiveDashboard'
 import AnalyticsDashboard from './components/AnalyticsDashboard'
 import ChatAssistant from './components/ChatAssistant'
+import LoginPage from './components/LoginPage'
+import Profile from './components/Profile'
+import ProtectedRoute from './components/ProtectedRoute'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { LayoutDashboard, FilePlus, Search, BarChart3, User, LogOut, ChevronDown } from 'lucide-react'
 import './App.css'
 
 function AppContent() {
-  const [user, setUser] = useState({ role: 'clerk', name: 'John Doe (Desk Officer)', id: 'clerk_001' })
+  const { user, updateUser, logout } = useAuth()
   const [currentGR, setCurrentGR] = useState(null)
   
   const navigate = useNavigate();
@@ -17,16 +22,17 @@ function AppContent() {
 
   // Handle role-based navigation and progress preservation
   const handleRoleChange = (newRole) => {
-    let userData = {};
+    let userData = { ...user, role: newRole };
+    // Preserve the actual user's name, only update role and ID
     if (newRole === 'clerk') {
-      userData = { role: 'clerk', name: 'John Doe (Desk Officer)', id: 'clerk_001' };
+      userData.id = 'clerk_001';
     } else if (newRole === 'senior_officer') {
-      userData = { role: 'senior_officer', name: 'Officer Deshmukh (Joint Secy)', id: 'officer_002' };
+      userData.id = 'officer_002';
     } else if (newRole === 'minister') {
-      userData = { role: 'minister', name: 'Hon. Minister Patil', id: 'minister_003' };
+      userData.id = 'minister_003';
     }
 
-    setUser(userData);
+    updateUser(userData);
 
     // Navigation logic:
     // If Clerk is on Create GR page, and switches to Minister/Senior Officer, automatically switch to executive review
@@ -39,39 +45,10 @@ function AppContent() {
     }
   };
 
-  // Determine theme colors based on role for clear visual distinction and higher contrast
-  const getRoleThemeStyles = () => {
-    if (user.role === 'clerk') {
-      return {
-        headerBg: 'linear-gradient(135deg, #1e3a8a 0%, #172554 100%)', // Deep Cobalt Blue
-        badgeBg: '#ff9933', // Saffron
-        badgeColor: '#ffffff',
-        borderBottomColor: '#ff9933'
-      };
-    } else if (user.role === 'senior_officer') {
-      return {
-        headerBg: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', // Charcoal Slate
-        badgeBg: '#e2e8f0', // Light Gray badge
-        badgeColor: '#0f172a', // Dark text
-        borderBottomColor: '#cbd5e1'
-      };
-    } else if (user.role === 'minister') {
-      return {
-        headerBg: 'linear-gradient(135deg, #064e3b 0%, #022c22 100%)', // Deep Emerald Green
-        badgeBg: '#f59e0b', // Amber/Gold badge
-        badgeColor: '#000000',
-        borderBottomColor: '#f59e0b'
-      };
-    }
-    return {
-      headerBg: 'linear-gradient(135deg, #0A2540 0%, #103459 100%)',
-      badgeBg: '#ff9933',
-      badgeColor: '#ffffff',
-      borderBottomColor: '#D4AF37'
-    };
-  };
 
-  const theme = getRoleThemeStyles();
+  if (!user) {
+    return <LoginPage />;
+  }
 
   return (
     <div className="app">
@@ -79,41 +56,69 @@ function AppContent() {
       <div className="tricolor-header-bar"></div>
 
       {/* Header - Government of Maharashtra Portal Style */}
-      <header className="header" style={{ background: theme.headerBg, borderBottom: `3px solid ${theme.borderBottomColor}` }}>
+      <header className="header">
         <div className="header-container">
-          <div className="logo-section" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div className="logo-section">
             <img 
               src="/emblem_india_maharashtra.png" 
               alt="State Emblem of India - Government of Maharashtra" 
-              style={{ height: '56px', width: 'auto', objectFit: 'contain', background: '#ffffff', padding: '4px 8px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+              style={{ height: '56px', width: 'auto', objectFit: 'contain', background: '#ffffff', padding: '4px 8px', borderRadius: '4px' }}
             />
+          </div>
+          <div className="header-text">
+            <div className="marathi-title">महाराष्ट्र शासन (Government of Maharashtra)</div>
+            <h1>MAHARASHTRA GR-Align</h1>
+            <p className="subtitle">डिजिटल कक्षा अधिकारी व धोरण लेखापरीक्षण प्रणाली | Digital Desk Officer & Policy Auditor System</p>
+          </div>
+          <div className="emblem-section">
             <img 
               src="/maharashtra_rajmudra_seal.png" 
               alt="Maharashtra Rajmudra Seal" 
-              style={{ height: '56px', width: 'auto', objectFit: 'contain', borderRadius: '50%', background: '#ffffff', padding: '2px', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+              style={{ height: '56px', width: 'auto', objectFit: 'contain', borderRadius: '50%', background: '#ffffff', padding: '2px' }}
             />
-            <div className="header-text">
-              <div className="marathi-title">महाराष्ट्र शासन (Government of Maharashtra)</div>
-              <h1>MAHARASHTRA GR-Align</h1>
-              <p className="subtitle">डिजिटल कक्षा अधिकारी व धोरण लेखापरीक्षण प्रणाली | Digital Desk Officer & Policy Auditor System</p>
-            </div>
           </div>
           <div className="user-section">
-            <div className="user-info">
-              <span className="user-role-badge" style={{ backgroundColor: theme.badgeBg, color: theme.badgeColor }}>
-                {user.role.toUpperCase().replace('_', ' ')}
-              </span>
-              <span className="user-name">{user.name}</span>
+            <div className="user-profile-menu">
+              <button className="profile-toggle">
+                <div className="user-avatar">
+                  <span className="avatar-initial">{user.name.charAt(0)}</span>
+                </div>
+                <div className="user-details">
+                  <span className="user-name">{user.name}</span>
+                  <span className="user-role">{user.role.replace('_', ' ').toUpperCase()}</span>
+                </div>
+                <ChevronDown size={16} strokeWidth={2} className="dropdown-arrow" />
+              </button>
+              <div className="profile-dropdown">
+                <div className="dropdown-header">
+                  <div className="dropdown-avatar">
+                    <span className="avatar-initial">{user.name.charAt(0)}</span>
+                  </div>
+                  <div className="dropdown-user-info">
+                    <span className="dropdown-user-name">{user.name}</span>
+                    <span className="dropdown-user-role">{user.role.replace('_', ' ').toUpperCase()}</span>
+                  </div>
+                </div>
+                <div className="dropdown-divider"></div>
+                <button className="dropdown-item">
+                  <User size={16} strokeWidth={2} className="dropdown-icon" />
+                  <span>My Profile</span>
+                </button>
+                <button className="dropdown-item">
+                  <LayoutDashboard size={16} strokeWidth={2} className="dropdown-icon" />
+                  <span>Settings</span>
+                </button>
+                <button className="dropdown-item">
+                  <FilePlus size={16} strokeWidth={2} className="dropdown-icon" />
+                  <span>Change Password</span>
+                </button>
+                <div className="dropdown-divider"></div>
+                <button className="dropdown-item logout-item" onClick={logout}>
+                  <LogOut size={16} strokeWidth={2} className="dropdown-icon" />
+                  <span>Logout</span>
+                </button>
+              </div>
             </div>
-            <select 
-              className="role-selector" 
-              value={user.role} 
-              onChange={(e) => handleRoleChange(e.target.value)}
-            >
-              <option value="clerk" style={{color: 'black'}}>Clerk: John Doe (Desk Officer)</option>
-              <option value="senior_officer" style={{color: 'black'}}>Senior Officer: Officer Deshmukh</option>
-              <option value="minister" style={{color: 'black'}}>Minister: Hon. Minister Patil</option>
-            </select>
           </div>
         </div>
       </header>
@@ -124,26 +129,37 @@ function AppContent() {
         <aside className="sidebar">
           <nav className="nav-menu">
             <NavLink to="/" className="nav-item">
-              <span className="icon">🏛️</span>
+              <LayoutDashboard size={20} strokeWidth={2} className="nav-icon" />
               <span className="label">Dashboard</span>
             </NavLink>
             {user.role === 'clerk' && (
               <NavLink to="/create" className="nav-item">
-                <span className="icon">✍️</span>
+                <FilePlus size={20} strokeWidth={2} className="nav-icon" />
                 <span className="label">Create GR (कक्षा अधिकारी)</span>
               </NavLink>
             )}
             {(user.role === 'senior_officer' || user.role === 'minister') && (
               <NavLink to={`/approve/pending`} className="nav-item">
-                <span className="icon">🗳️</span>
+                <FilePlus size={20} strokeWidth={2} className="nav-icon" />
                 <span className="label">Executive Review</span>
               </NavLink>
             )}
             <NavLink to="/analytics" className="nav-item">
-              <span className="icon">📈</span>
+              <BarChart3 size={20} strokeWidth={2} className="nav-icon" />
               <span className="label">Analytics & Audit</span>
             </NavLink>
           </nav>
+
+          <div className="sidebar-footer">
+            <NavLink to="/profile" className="nav-item footer-nav-item">
+              <User size={20} strokeWidth={2} className="nav-icon" />
+              <span className="label">Profile</span>
+            </NavLink>
+            <button className="nav-item footer-nav-item logout-btn" onClick={logout}>
+              <LogOut size={20} strokeWidth={2} className="nav-icon" />
+              <span className="label">Logout</span>
+            </button>
+          </div>
 
           <div className="sidebar-emblem-quote">
             <div className="quote-marathi">"प्रतिपच्चंद्रलेखेव वर्धिष्णुर्विश्ववंदिता"</div>
@@ -154,11 +170,37 @@ function AppContent() {
         {/* Main Content Viewport */}
         <main className="main-content">
           <Routes>
-            <Route path="/" element={<Dashboard user={user} setCurrentGR={setCurrentGR} />} />
-            <Route path="/create" element={<GRWizard setCurrentGR={setCurrentGR} user={user} />} />
-            <Route path="/draft/:grId" element={<DraftWorkspace currentGR={currentGR} user={user} />} />
-            <Route path="/approve/:grId" element={<ExecutiveDashboard user={user} />} />
-            <Route path="/analytics" element={<AnalyticsDashboard />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/" element={
+              <ProtectedRoute>
+                <Dashboard user={user} setCurrentGR={setCurrentGR} />
+              </ProtectedRoute>
+            } />
+            <Route path="/create" element={
+              <ProtectedRoute>
+                <GRWizard setCurrentGR={setCurrentGR} user={user} />
+              </ProtectedRoute>
+            } />
+            <Route path="/draft/:grId" element={
+              <ProtectedRoute>
+                <DraftWorkspace currentGR={currentGR} user={user} />
+              </ProtectedRoute>
+            } />
+            <Route path="/approve/:grId" element={
+              <ProtectedRoute>
+                <ExecutiveDashboard user={user} />
+              </ProtectedRoute>
+            } />
+            <Route path="/analytics" element={
+              <ProtectedRoute>
+                <AnalyticsDashboard />
+              </ProtectedRoute>
+            } />
+            <Route path="/profile" element={
+              <ProtectedRoute>
+                <Profile />
+              </ProtectedRoute>
+            } />
           </Routes>
         </main>
       </div>
@@ -183,7 +225,9 @@ function AppContent() {
 function App() {
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <AppContent />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </Router>
   );
 }

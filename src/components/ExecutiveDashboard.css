@@ -1,9 +1,5 @@
 /* Executive Dashboard Component Styles */
 
-.executive-dashboard {
-  animation: fadeIn 0.3s ease-in;
-}
-
 .dashboard-title {
   margin-bottom: 24px;
 }
@@ -28,8 +24,8 @@
 
 .approval-queue {
   background: white;
-  border-radius: 8px;
   border: 1px solid #e0e0e0;
+  border-radius: 4px;
   overflow: hidden;
 }
 
@@ -51,7 +47,6 @@
   padding: 16px;
   border-bottom: 1px solid #eee;
   cursor: pointer;
-  transition: all 0.2s;
   border-left: 4px solid transparent;
 }
 
@@ -104,8 +99,8 @@
 /* Approval Panel */
 .approval-panel {
   background: white;
-  border-radius: 8px;
   border: 1px solid #e0e0e0;
+  border-radius: 4px;
   padding: 24px;
 }
 
@@ -153,7 +148,7 @@
 .metric {
   background: #f9f9f9;
   padding: 16px;
-  border-radius: 8px;
+  border-radius: 4px;
   border: 1px solid #eee;
 }
 
@@ -176,7 +171,7 @@
 /* Issues Panel */
 .issues-panel {
   background: #fff3e0;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 16px;
   margin-bottom: 24px;
   border-left: 4px solid #f57c00;
@@ -201,7 +196,6 @@
   gap: 8px;
   padding: 8px;
   background: white;
-  border-radius: 4px;
   font-size: 12px;
 }
 
@@ -237,7 +231,7 @@
 /* Quick View */
 .quick-view {
   background: #f9f9f9;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 16px;
   margin-bottom: 24px;
 }
@@ -271,7 +265,6 @@
   font-weight: 600;
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.2s;
 }
 
 .view-full:hover {
@@ -292,7 +285,6 @@
   font-weight: 600;
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s;
 }
 
 .btn-approve {
@@ -302,7 +294,6 @@
 
 .btn-approve:hover {
   background: #229954;
-  box-shadow: 0 2px 8px rgba(39, 174, 96, 0.3);
 }
 
 .btn-reject {
@@ -312,7 +303,6 @@
 
 .btn-reject:hover {
   background: #b71c1c;
-  box-shadow: 0 2px 8px rgba(211, 47, 47, 0.3);
 }
 
 .empty-state {
@@ -342,20 +332,5 @@
 @media (max-width: 1024px) {
   .dashboard-container {
     grid-template-columns: 1fr;
-  }
-
-  .metrics-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }

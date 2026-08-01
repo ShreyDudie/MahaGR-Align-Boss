@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
+import { Building2, Scroll, Globe, Clipboard, Hand, HelpCircle, Book, Bot, Search, Lightbulb, AlertTriangle, Timer, RefreshCw, Wrench, X, User, Clock, ArrowRight, Circle, Printer, Scale, DollarSign, Upload, File, Paperclip } from 'lucide-react';
 import './ChatAssistant.css';
 
 export default function ChatAssistant() {
@@ -7,7 +8,7 @@ export default function ChatAssistant() {
   const [messages, setMessages] = useState([
     {
       sender: 'assistant',
-      text: '🏛️ **Welcome to MahaGR AI Assistant!**\n\nI am your expert guide to **98,980+ Maharashtra Government Resolutions** and general government information.\n\n**What I can help you with:**\n• 📜 **Find GRs** - Search policies, schemes, and sanctions\n• 🏛️ **Government Info** - Departments, structure, and services\n• 🌐 **Website Guidance** - Official portals and downloads\n• 📋 **Scheme Details** - Eligibility, benefits, and applications\n\n**Try asking:**\n• "Find farmer loan scheme GRs"\n• "What is the structure of Maharashtra government?"\n• "How to download forms from maharashtra.gov.in?"\n• "Tell me about the Agriculture Department"',
+      text: '**Welcome to MahaGR AI Assistant!**\n\nI am your expert guide to **98,980+ Maharashtra Government Resolutions** and general government information.\n\n**What I can help you with:**\n• **Find GRs** - Search policies, schemes, and sanctions\n• **Government Info** - Departments, structure, and services\n• **Website Guidance** - Official portals and downloads\n• **Scheme Details** - Eligibility, benefits, and applications\n\n**Try asking:**\n• "Find farmer loan scheme GRs"\n• "What is the structure of Maharashtra government?"\n• "How to download forms from maharashtra.gov.in?"\n• "Tell me about the Agriculture Department"',
       matchingGRs: [],
       source: 'welcome'
     }
@@ -71,7 +72,7 @@ export default function ChatAssistant() {
           ...prev,
           {
             sender: 'assistant',
-            text: '⚠️ I encountered an issue processing your query. Please try rephrasing or ask about specific GR topics.',
+            text: 'I encountered an issue processing your query. Please try rephrasing or ask about specific GR topics.',
             matchingGRs: [],
             source: 'error'
           }
@@ -82,13 +83,13 @@ export default function ChatAssistant() {
       let errorMessage = 'Unable to connect to the GR AI search engine. Please ensure the backend server is running.';
       
       if (error.code === 'ECONNABORTED') {
-        errorMessage = '⏱️ The request timed out. Please try a more specific query or check your connection.';
+        errorMessage = 'The request timed out. Please try a more specific query or check your connection.';
       } else if (error.response?.status === 429) {
-        errorMessage = '🔄 Too many requests. Please wait a moment and try again.';
+        errorMessage = 'Too many requests. Please wait a moment and try again.';
       } else if (error.response?.status === 503) {
-        errorMessage = '🔧 The AI assistant is currently initializing. Please wait a moment and try again.';
+        errorMessage = 'The AI assistant is currently initializing. Please wait a moment and try again.';
       } else if (error.response?.status === 500) {
-        errorMessage = '⚠️ Server error. Please try again later.';
+        errorMessage = 'Server error. Please try again later.';
       }
       
       setMessages(prev => [
@@ -132,7 +133,7 @@ export default function ChatAssistant() {
   // Enhanced suggestions with categories
   const suggestionCategories = [
     {
-      label: '📜 GR Queries',
+      label: 'GR Queries',
       suggestions: [
         'Find GRs about farmer loan schemes',
         'Solar pump subsidy scheme rules',
@@ -142,7 +143,7 @@ export default function ChatAssistant() {
       ]
     },
     {
-      label: '🏛️ Government Info',
+      label: 'Government Info',
       suggestions: [
         'What is the structure of Maharashtra government?',
         'Tell me about the Agriculture Department',
@@ -152,7 +153,7 @@ export default function ChatAssistant() {
       ]
     },
     {
-      label: '🌐 Website Help',
+      label: 'Website Help',
       suggestions: [
         'How to download forms from maharashtra.gov.in?',
         'What is MahaOnline portal?',
@@ -179,21 +180,21 @@ export default function ChatAssistant() {
   // Helper to get source display name
   const getSourceDisplay = (source) => {
     const sourceMap = {
-      'welcome': '👋 Welcome',
-      'help': '❓ Help',
-      'general_knowledge': '📚 General Knowledge',
-      'gr_database': '📜 GR Database',
-      'general_knowledge_fallback': '📚 General Knowledge (Fallback)',
-      'website': '🌐 Website Info',
-      'scholarship': '🎓 Scholarship Info',
-      'gemini': '🤖 AI (Gemini)',
-      'no_results': '🔍 No Results',
-      'fallback': '💡 Fallback',
-      'error': '⚠️ Error',
-      'greeting': '👋 Greeting',
-      'empty_query': '❓ Empty Query'
+      'welcome': 'Welcome',
+      'help': 'Help',
+      'general_knowledge': 'General Knowledge',
+      'gr_database': 'GR Database',
+      'general_knowledge_fallback': 'General Knowledge (Fallback)',
+      'website': 'Website Info',
+      'scholarship': 'Scholarship Info',
+      'gemini': 'AI (Gemini)',
+      'no_results': 'No Results',
+      'fallback': 'Fallback',
+      'error': 'Error',
+      'greeting': 'Greeting',
+      'empty_query': 'Empty Query'
     };
-    return sourceMap[source] || '🤖 AI Response';
+    return sourceMap[source] || 'AI Response';
   };
 
   const renderMessageContent = (text, matchingGRs = [], source = '') => {
@@ -251,7 +252,7 @@ export default function ChatAssistant() {
         {hasGRs && (
           <div className="chat-gr-links-section">
             <div className="chat-gr-links-header">
-              📄 {matchingGRs.length > 1 ? `Found ${matchingGRs.length} Related GRs` : 'Related GR Document'}
+              <File size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> {matchingGRs.length > 1 ? `Found ${matchingGRs.length} Related GRs` : 'Related GR Document'}
             </div>
             <div className="chat-gr-links-list">
               {matchingGRs.slice(0, 4).map((gr, i) => (
@@ -261,7 +262,7 @@ export default function ChatAssistant() {
                   onClick={() => handleOpenGR(gr.id)}
                   title={`View full GR document: ${gr.id}`}
                 >
-                  <span className="gr-btn-icon">📄</span>
+                  <span className="gr-btn-icon"><File size={20} strokeWidth={2} /></span>
                   <span className="gr-btn-label">
                     <strong>{gr.id}</strong>
                     <span className="gr-btn-dept">{gr.department || 'General'}</span>
@@ -291,7 +292,7 @@ export default function ChatAssistant() {
             onClick={() => setIsOpen(true)}
             title="Open AI Policy Search Assistant"
           >
-            <div className="chat-btn-icon">🤖</div>
+            <div className="chat-btn-icon"><Bot size={28} strokeWidth={2} /></div>
             <div className="chat-btn-text">
               <span className="title">AI Policy Assistant</span>
               <span className="status">
@@ -309,7 +310,7 @@ export default function ChatAssistant() {
         <div className="chat-window-container">
           <div className="chat-window-header">
             <div className="header-left">
-              <div className="assistant-avatar">🏛️</div>
+              <div className="assistant-avatar"><Building2 size={24} strokeWidth={2} /></div>
               <div>
                 <h4>MahaGR AI Assistant</h4>
                 <p>
@@ -371,7 +372,7 @@ export default function ChatAssistant() {
             {messages.map((msg, idx) => (
               <div key={idx} className={`chat-message-row ${msg.sender}`}>
                 <div className="message-avatar">
-                  {msg.sender === 'assistant' ? '🤖' : '👤'}
+                  {msg.sender === 'assistant' ? <Bot size={20} strokeWidth={2} /> : <User size={20} strokeWidth={2} />}
                 </div>
                 <div className="message-bubble">
                   {renderMessageContent(msg.text, msg.matchingGRs, msg.source)}
@@ -381,7 +382,7 @@ export default function ChatAssistant() {
 
             {loading && (
               <div className="chat-message-row assistant">
-                <div className="message-avatar">🤖</div>
+                <div className="message-avatar"><Bot size={20} strokeWidth={2} /></div>
                 <div className="message-bubble loading-bubble">
                   <div className="typing-dots">
                     <span></span><span></span><span></span>
@@ -413,13 +414,13 @@ export default function ChatAssistant() {
                 onClick={() => handleSend()}
                 disabled={!inputValue.trim() || loading}
               >
-                {loading ? '⏳' : '➔'}
+                {loading ? <Clock size={16} strokeWidth={2} /> : <ArrowRight size={16} strokeWidth={2} />}
               </button>
             </div>
             <div className="chat-input-footer">
               <span className="input-hint">Press Enter to send</span>
               <span className="input-status">
-                {loading ? '⏳ Processing...' : '🟢 Ready'}
+                {loading ? <><Clock size={12} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Processing...</> : <><Circle size={8} strokeWidth={2} fill="#22c55e" color="#22c55e" style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Ready</>}
               </span>
             </div>
           </div>
@@ -432,7 +433,7 @@ export default function ChatAssistant() {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-header-left">
-                <span className="modal-icon">📄</span>
+                <span className="modal-icon"><File size={24} strokeWidth={2} /></span>
                 <h3>
                   GR Document: {selectedGRModal.metadata?.grNumber || selectedGRModal.id}
                 </h3>
@@ -443,13 +444,13 @@ export default function ChatAssistant() {
                   onClick={() => window.open(`http://localhost:5000/api/gr/${selectedGRModal.id}/export/html`, '_blank')}
                   title="Open PDF View"
                 >
-                  🖨️ PDF
+                  <Printer size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> PDF
                 </button>
                 <button 
                   className="modal-close-btn"
                   onClick={() => setSelectedGRModal(null)}
                 >
-                  ×
+                  <X size={20} strokeWidth={2} />
                 </button>
               </div>
             </div>
@@ -458,8 +459,8 @@ export default function ChatAssistant() {
               <div className="modal-gr-content">
                 <div className="gr-header">
                   <div className="gr-emblem">
-                    <span>🏛️</span>
-                    <span>🏛️</span>
+                    <Building2 size={32} strokeWidth={1.5} />
+                    <Building2 size={32} strokeWidth={1.5} />
                   </div>
                   <h2>Government of Maharashtra</h2>
                   <h3>{selectedGRModal.department || 'Department of Administration'}</h3>
@@ -497,20 +498,20 @@ export default function ChatAssistant() {
 
                 {selectedGRModal.sections?.preamble_english && (
                   <div className="gr-section">
-                    <h5>📜 Preamble</h5>
+                    <h5><Scroll size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Preamble</h5>
                     <p>{selectedGRModal.sections.preamble_english}</p>
                   </div>
                 )}
 
                 {selectedGRModal.sections?.introduction && (
                   <div className="gr-section">
-                    <h5>📋 Introduction</h5>
+                    <h5><Clipboard size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Introduction</h5>
                     <p>{selectedGRModal.sections.introduction}</p>
                   </div>
                 )}
 
                 <div className="gr-section">
-                  <h5>⚖️ Government Resolution</h5>
+                  <h5><Scale size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Government Resolution</h5>
                   {selectedGRModal.sections?.resolutions && selectedGRModal.sections.resolutions.length > 0 ? (
                     selectedGRModal.sections.resolutions.map((clause, idx) => (
                       <p key={idx} className="gr-clause">
@@ -525,7 +526,7 @@ export default function ChatAssistant() {
 
                 {selectedGRModal.sections?.financials && selectedGRModal.sections.financials.length > 0 && (
                   <div className="gr-section">
-                    <h5>💰 Financial Details</h5>
+                    <h5><DollarSign size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Financial Details</h5>
                     <table className="gr-financial-table">
                       <thead>
                         <tr>
@@ -551,7 +552,7 @@ export default function ChatAssistant() {
 
                 {selectedGRModal.sections?.distribution && selectedGRModal.sections.distribution.length > 0 && (
                   <div className="gr-section">
-                    <h5>📤 Distribution</h5>
+                    <h5><Upload size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Distribution</h5>
                     <ol className="gr-distribution-list">
                       {selectedGRModal.sections.distribution.map((dist, idx) => (
                         <li key={idx}>{dist.recipient}</li>
@@ -562,7 +563,7 @@ export default function ChatAssistant() {
 
                 {selectedGRModal.sections?.footer_distribution_text && (
                   <div className="gr-section">
-                    <h5>📎 Additional Distribution</h5>
+                    <h5><Paperclip size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Additional Distribution</h5>
                     <pre className="gr-distribution-text">{selectedGRModal.sections.footer_distribution_text}</pre>
                   </div>
                 )}
@@ -580,7 +581,7 @@ export default function ChatAssistant() {
                 className="modal-pdf-btn"
                 onClick={() => window.open(`http://localhost:5000/api/gr/${selectedGRModal.id}/export/html`, '_blank')}
               >
-                🖨️ Open Full PDF View
+                <Printer size={16} strokeWidth={2} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Open Full PDF View
               </button>
             </div>
           </div>
